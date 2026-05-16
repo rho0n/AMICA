@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>AMICA</title>
+<style>
+  /* ── Fonts ──────────────────────────────────────────── */
+  @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500&display=swap');
+
+  /* ── Design Tokens ──────────────────────────────────── */
+  :root {
+    --cream:     #FAF6F0;
+    --warm-100:  #F5EDE0;
+    --warm-200:  #ECD9C0;
+    --amber:     #D4820A;
+    --amber-soft:#E8A832;
+    --amber-glow:rgba(212,130,10,0.15);
+    --brown:     #5C3D1E;
+    --brown-light:#8B6240;
+    --text:      #2D1F0E;
+    --text-soft: #6B4E2E;
+    --white:     #FFFFFF;
+    --shadow:    0 4px 24px rgba(93,61,30,0.12);
+    --shadow-lg: 0 8px 40px rgba(93,61,30,0.18);
+    --radius:    20px;
+    --radius-lg: 32px;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-head: 'Lora', Georgia, serif;
+    --tap:       64px;   /* Minimum tap target — accessibility */
+  }
+
+  /* ── Reset & Base ────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { height: 100%; -webkit-text-size-adjust: 100%; }
+
+  body {
+    height: 100%;
+    background: var(--cream);
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 20px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+
+  /* ── App Shell ───────────────────────────────────────── */
+  #app {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  /* ── Screens ─────────────────────────────────────────── */
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(16px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    overflow: hidden;
+  }
+  .screen.active {
+    opacity: 1;
+    pointer-events: all;
+    transform: translateY(0);
+  }
+
+  /* ── SCREEN: Loading ─────────────────────────────────── */
+  #screen-loading {
+    align-items: center;
+    justify-content: center;
+    background: var(--cream);
+    gap: 24px;
+  }
+  .loading-logo {
+    font-family: var(--font-head);
+    font-size: 56px;
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: -1px;
+  }
+  .loading-sub {
+    font-size: 18px;
+    color: var(--text-soft);
+  }
+  .spinner {
+    width: 48px; height: 48px;
+    border: 4px solid var(--warm-200);
+    border-top-color: var(--amber);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── SCREEN: Home ────────────────────────────────────── */
+  #screen-home {
+    background: var(--cream);
+  }
+  .home-header {
+    background: linear-gradient(160deg, var(--brown) 0%, #7A4F25 100%);
+    padding: 48px 28px 36px;
+    position: relative;
+    overflow: hidden;
+  }
+  .home-header::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.06);
+  }
+  .home-header::after {
+    content: '';
+    position: absolute;
+    bottom: -40px; left: 20px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+  }
+  .home-greeting {
+    font-family: var(--font-head);
+    font-size: 15px;
+    color: rgba(255,255,255,0.7);
+    margin-bottom: 4px;
+    font-style: italic;
+  }
+  .home-name {
+    font-family: var(--font-head);
+    font-size: 38px;
+    font-weight: 700;
+    color: var(--white);
+    line-height: 1.1;
+    margin-bottom: 12px;
+  }
+  .home-tagline {
+    font-size: 17px;
+    color: rgba(255,255,255,0.75);
+    line-height: 1.4;
+  }
+  .home-logo {
+    position: absolute;
+    top: 20px; right: 28px;
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--amber-soft);
+    letter-spacing: 2px;
+  }
+
+  .home-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* Big primary action */
+  .btn-talk {
+    width: 100%;
+    min-height: 88px;
+    background: linear-gradient(135deg, var(--amber) 0%, var(--amber-soft) 100%);
+    border: none;
+    border-radius: var(--radius-lg);
+    color: var(--white);
+    font-family: var(--font-head);
+    font-size: 26px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    transition: transform 0.15s, box-shadow 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-talk:active {
+    transform: scale(0.97);
+    box-shadow: var(--shadow);
+  }
+  .btn-talk .icon { font-size: 32px; }
+
+  /* Cards */
+  .card {
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .card-title {
+    font-family: var(--font-head);
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--brown);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--warm-100);
+    font-size: 18px;
+    color: var(--text);
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-row .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+    flex-shrink: 0;
+  }
+
+  .btn-secondary {
+    width: 100%;
+    min-height: var(--tap);
+    background: var(--white);
+    border: 2.5px solid var(--warm-200);
+    border-radius: var(--radius);
+    color: var(--brown);
+    font-size: 19px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: background 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-secondary:active {
+    background: var(--warm-100);
+    border-color: var(--amber);
+  }
+
+  /* ── SCREEN: Chat ────────────────────────────────────── */
+  #screen-chat {
+    background: var(--cream);
+  }
+  .chat-header {
+    background: var(--brown);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .btn-back {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    border-radius: 12px;
+    width: var(--tap);
+    height: var(--tap);
+    color: var(--white);
+    font-size: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+  }
+  .chat-header-title {
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+  }
+  .chat-status {
+    margin-left: auto;
+    font-size: 13px;
+    color: rgba(255,255,255,0.65);
+    background: rgba(255,255,255,0.1);
+    padding: 4px 10px;
+    border-radius: 20px;
+  }
+  .chat-status.thinking { color: var(--amber-soft); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Message bubbles */
+  .msg {
+    max-width: 88%;
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    font-size: 20px;
+    line-height: 1.55;
+    animation: msgIn 0.2s ease;
+  }
+  @keyframes msgIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .msg-amica {
+    background: var(--white);
+    color: var(--text);
+    align-self: flex-start;
+    box-shadow: var(--shadow);
+    border-bottom-left-radius: 4px;
+  }
+  .msg-user {
+    background: var(--brown);
+    color: var(--white);
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+  .msg-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    opacity: 0.65;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* Typing indicator */
+  .typing-dots {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 18px 22px;
+  }
+  .typing-dots span {
+    width: 10px; height: 10px;
+    background: var(--warm-200);
+    border-radius: 50%;
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+  .typing-dots span:nth-child(1) { animation-delay: 0s; }
+  .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); background: var(--warm-200); }
+    30% { transform: translateY(-8px); background: var(--amber-soft); }
+  }
+
+  /* Chat input area */
+  .chat-footer {
+    background: var(--white);
+    border-top: 2px solid var(--warm-100);
+    padding: 12px 12px 16px;
+    flex-shrink: 0;
+  }
+  .chat-input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    margin-bottom: 10px;
+  }
+  #chat-input {
+    flex: 1;
+    background: var(--warm-100);
+    border: 2px solid var(--warm-200);
+    border-radius: 18px;
+    padding: 14px 18px;
+    font-size: 20px;
+    font-family: var(--font-body);
+    color: var(--text);
+    resize: none;
+    min-height: 54px;
+    max-height: 120px;
+    outline: none;
+    transition: border-color 0.2s;
+    line-height: 1.4;
+  }
+  #chat-input:focus {
+    border-color: var(--amber);
+    background: var(--white);
+  }
+  #chat-input::placeholder { color: var(--brown-light); opacity: 0.7; }
+
+  .btn-send {
+    width: 56px; height: 56px;
+    background: var(--amber);
+    border: none;
+    border-radius: 50%;
+    color: var(--white);
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(212,130,10,0.4);
+    transition: transform 0.15s, background 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-send:active { transform: scale(0.92); }
+  .btn-send:disabled { background: var(--warm-200); box-shadow: none; }
+
+  /* Voice buttons row */
+  .voice-row {
+    display: flex;
+    gap: 10px;
+  }
+  .btn-voice {
+    flex: 1;
+    height: var(--tap);
+    background: var(--warm-100);
+    border: 2px solid var(--warm-200);
+    border-radius: 14px;
+    color: var(--brown);
+    font-size: 17px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: background 0.15s, border-color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn-voice:active, .btn-voice.active {
+    background: var(--amber-glow);
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .btn-voice.recording {
+    background: #FFF0F0;
+    border-color: #E05555;
+    color: #C03030;
+    animation: pulse-border 1s infinite;
+  }
+  @keyframes pulse-border {
+    0%, 100% { border-color: #E05555; }
+    50% { border-color: #FF8888; }
+  }
+
+  /* ── SCREEN: Memory ──────────────────────────────────── */
+  #screen-memory {
+    background: var(--cream);
+  }
+  .mem-header {
+    background: var(--brown);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .mem-header-title {
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--white);
+  }
+  .mem-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mem-section-title {
+    font-family: var(--font-head);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-soft);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1.5px solid var(--warm-200);
+  }
+  .mem-item {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--warm-100);
+    font-size: 18px;
+  }
+  .mem-item:last-child { border-bottom: none; }
+  .mem-item-name {
+    font-weight: 600;
+    color: var(--brown);
+    margin-bottom: 2px;
+  }
+  .mem-item-detail {
+    color: var(--text-soft);
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  .mem-badge {
+    display: inline-block;
+    background: var(--amber-glow);
+    color: var(--amber);
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .mem-empty {
+    color: var(--text-soft);
+    font-style: italic;
+    font-size: 18px;
+    padding: 12px 0;
+  }
+
+  /* ── How To Use Screen ────────────────────────────────── */
+  #screen-howto {
+    background: var(--cream);
+  }
+  .howto-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 20px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .howto-intro {
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+    font-size: 20px;
+    line-height: 1.6;
+    box-shadow: var(--shadow);
+    color: var(--text);
+  }
+  .howto-intro strong {
+    color: var(--amber);
+    font-family: var(--font-head);
+  }
+  .howto-step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    align-items: flex-start;
+  }
+  .howto-num {
+    width: 44px; height: 44px;
+    background: var(--amber);
+    border-radius: 50%;
+    color: var(--white);
+    font-family: var(--font-head);
+    font-size: 22px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .howto-text {
+    font-size: 19px;
+    line-height: 1.55;
+    padding-top: 8px;
+    color: var(--text);
+  }
+
+  /* ── Toast notification ──────────────────────────────── */
+  #toast {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--brown);
+    color: var(--white);
+    padding: 14px 24px;
+    border-radius: 50px;
+    font-size: 17px;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 100;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* ── Scrollbar styling ───────────────────────────────── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--warm-200); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ LOADING ═══════════════════════════════════════ -->
+  <div class="screen active" id="screen-loading">
+    <div class="loading-logo">AMICA</div>
+    <div class="loading-sub">Your companion is waking up…</div>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ═══ HOME ══════════════════════════════════════════ -->
+  <div class="screen" id="screen-home">
+    <div class="home-header">
+      <div class="home-logo">AMICA</div>
+      <div class="home-greeting">Good <span id="time-of-day">day</span>,</div>
+      <div class="home-name" id="home-name">…</div>
+      <div class="home-tagline">I'm here whenever you need me.<br>Just tap the button below.</div>
+    </div>
+
+    <div class="home-body">
+      <button class="btn-talk" onclick="goChat()">
+        <span class="icon">💬</span>
+        <span>Talk to AMICA</span>
+      </button>
+
+      <div class="card" id="card-events" style="display:none">
+        <div class="card-title">📅 Coming up</div>
+        <div id="events-list"></div>
+      </div>
+
+      <div class="card" id="card-meds" style="display:none">
+        <div class="card-title">💊 Today's medicines</div>
+        <div id="meds-list"></div>
+      </div>
+
+      <button class="btn-secondary" onclick="goScreen('screen-memory')">
+        <span>🧠</span>
+        <span>What AMICA knows about me</span>
+      </button>
+
+      <button class="btn-secondary" onclick="goScreen('screen-howto')">
+        <span>❓</span>
+        <span>How to use AMICA</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ═══ CHAT ══════════════════════════════════════════ -->
+  <div class="screen" id="screen-chat">
+    <div class="chat-header">
+      <button class="btn-back" onclick="goScreen('screen-home')" aria-label="Go back">←</button>
+      <div class="chat-header-title">AMICA</div>
+      <div class="chat-status" id="chat-status-badge">Ready</div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <!-- Messages injected here -->
+    </div>
+
+    <div class="chat-footer">
+      <div class="chat-input-row">
+        <textarea
+          id="chat-input"
+          placeholder="Type your message here…"
+          rows="1"
+          aria-label="Message to AMICA"
+        ></textarea>
+        <button class="btn-send" id="btn-send" onclick="sendMessage()" aria-label="Send message">➤</button>
+      </div>
+      <div class="voice-row">
+        <button class="btn-voice" id="btn-mic" onclick="toggleMic()" aria-label="Speak your message">
+          🎤 <span id="mic-label">Speak</span>
+        </button>
+        <button class="btn-voice" id="btn-speak" onclick="speakLast()" aria-label="Read last message aloud">
+          🔊 Read aloud
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MEMORY VIEWER ════════════════════════════════ -->
+  <div class="screen" id="screen-memory">
+    <div class="mem-header">
+      <button class="btn-back" onclick="goScreen('screen-home')" aria-label="Go back">←</button>
+      <div class="mem-header-title">What AMICA Knows</div>
+    </div>
+    <div class="mem-body" id="mem-body">
+      <div class="mem-empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- ═══ HOW TO USE ════════════════════════════════════ -->
+  <div class="screen" id="screen-howto">
+    <div class="mem-header">
+      <button class="btn-back" onclick="goScreen('screen-home')" aria-label="Go back">←</button>
+      <div class="mem-header-title">How to Use AMICA</div>
+    </div>
+    <div class="howto-body">
+      <div class="howto-intro">
+        <strong>AMICA</strong> is a friendly, private assistant just for you.
+        She lives on this little device nearby — not on the internet.
+        No one else can see what you talk about.
+      </div>
+
+      <div class="howto-step">
+        <div class="howto-num">1</div>
+        <div class="howto-text">Tap <strong>"Talk to AMICA"</strong> on the main screen to start a conversation.</div>
+      </div>
+      <div class="howto-step">
+        <div class="howto-num">2</div>
+        <div class="howto-text"><strong>Type</strong> what you want to say — or tap the <strong>🎤 Speak</strong> button and just talk.</div>
+      </div>
+      <div class="howto-step">
+        <div class="howto-num">3</div>
+        <div class="howto-text">AMICA will reply. Tap <strong>🔊 Read aloud</strong> if you'd like her to read it to you.</div>
+      </div>
+      <div class="howto-step">
+        <div class="howto-num">4</div>
+        <div class="howto-text">You can ask her anything — about your medicines, who is visiting, what day something is, or just for a chat.</div>
+      </div>
+      <div class="howto-step">
+        <div class="howto-num">5</div>
+        <div class="howto-text">AMICA remembers things about you — family, medicines, appointments. Tap <strong>"What AMICA knows"</strong> to see it all.</div>
+      </div>
+
+      <div class="howto-intro" style="margin-top:8px">
+        <strong>Things you can ask:</strong><br><br>
+        "Do I have anything on this week?"<br>
+        "What tablets do I take in the morning?"<br>
+        "When did Sarah last visit?"<br>
+        "Can you remind me what Tom does for work?"<br>
+        "I'm not sure if I took my tablets today"
+      </div>
+
+      <button class="btn-talk" onclick="goChat()" style="margin-top: 8px">
+        <span class="icon">💬</span>
+        <span>Start talking now</span>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  AMICA — Phone UI Logic
+// ═══════════════════════════════════════════════════════
+
+// State
+let conversationHistory = [];
+let isSending = false;
+let recognition = null;
+let isRecording = false;
+let lastAmicaMessage = '';
+let profileData = {};
+
+// ── Startup ─────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', async () => {
+  setTimeOfDay();
+  await waitForAmica();
+  await loadProfile();
+  goScreen('screen-home');
+  addWelcomeMessage();
+});
+
+function setTimeOfDay() {
+  const h = new Date().getHours();
+  const el = document.getElementById('time-of-day');
+  if (h < 12) el.textContent = 'morning';
+  else if (h < 17) el.textContent = 'afternoon';
+  else el.textContent = 'evening';
+}
+
+async function waitForAmica() {
+  // Poll until llama-server is ready (can take 30–60s on first load)
+  for (let i = 0; i < 60; i++) {
+    try {
+      const r = await fetch('/api/health');
+      const data = await r.json();
+      if (data.llama_server === 'ready') return;
+    } catch (e) { /* still loading */ }
+    await sleep(2000);
+  }
+}
+
+async function loadProfile() {
+  try {
+    const r = await fetch('/api/profile');
+    profileData = await r.json();
+    document.getElementById('home-name').textContent = profileData.name;
+  } catch (e) {
+    document.getElementById('home-name').textContent = 'Friend';
+  }
+  // Load memory for home cards
+  try {
+    const r = await fetch('/api/memory');
+    const mem = await r.json();
+    renderHomeCards(mem);
+  } catch (e) { /* ok */ }
+}
+
+function renderHomeCards(mem) {
+  // Events card
+  const events = (mem.upcoming_events || []).filter(e => {
+    const d = new Date(e.date);
+    const now = new Date();
+    return d >= new Date(now.setDate(now.getDate() - 1));
+  }).slice(0, 3);
+
+  if (events.length > 0) {
+    const card = document.getElementById('card-events');
+    const list = document.getElementById('events-list');
+    card.style.display = '';
+    list.innerHTML = events.map(e => `
+      <div class="info-row">
+        <div class="dot"></div>
+        <div>${formatEventDate(e.date)} — ${e.description}</div>
+      </div>
+    `).join('');
+  }
+
+  // Medications card
+  const meds = mem.medications || [];
+  if (meds.length > 0) {
+    const card = document.getElementById('card-meds');
+    const list = document.getElementById('meds-list');
+    card.style.display = '';
+    list.innerHTML = meds.map(m => `
+      <div class="info-row">
+        <div class="dot"></div>
+        <div><strong>${m.name}</strong> ${m.dose || ''} — ${m.time || ''}</div>
+      </div>
+    `).join('');
+  }
+}
+
+function formatEventDate(dateStr) {
+  const d = new Date(dateStr);
+  const today = new Date();
+  const diff = Math.round((d - today) / 86400000);
+  if (diff === 0) return '📌 Today';
+  if (diff === 1) return '📌 Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'});
+}
+
+// ── Screen navigation ────────────────────────────────────
+function goScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id === 'screen-memory') loadMemoryView();
+}
+
+function goChat() {
+  goScreen('screen-chat');
+  document.getElementById('chat-input').focus();
+}
+
+// ── Welcome message ──────────────────────────────────────
+function addWelcomeMessage() {
+  const name = profileData.name || 'Friend';
+  const h = new Date().getHours();
+  let greeting = 'Hello';
+  if (h < 12) greeting = 'Good morning';
+  else if (h < 17) greeting = 'Good afternoon';
+  else greeting = 'Good evening';
+
+  appendMessage(
+    'amica',
+    `${greeting}, ${name}! I'm AMICA, your personal companion. I'm here to help with reminders, answer questions, or just have a chat. What would you like to talk about today?`
+  );
+}
+
+// ── Chat ─────────────────────────────────────────────────
+function appendMessage(role, text) {
+  const container = document.getElementById('chat-messages');
+
+  // Remove typing indicator if present
+  const typing = container.querySelector('.typing-dots');
+  if (typing) typing.parentElement.remove();
+
+  const wrapper = document.createElement('div');
+  wrapper.style.display = 'flex';
+  wrapper.style.flexDirection = 'column';
+  wrapper.style.alignItems = role === 'user' ? 'flex-end' : 'flex-start';
+
+  const bubble = document.createElement('div');
+  bubble.className = `msg msg-${role === 'user' ? 'user' : 'amica'}`;
+
+  const label = document.createElement('div');
+  label.className = 'msg-name';
+  label.textContent = role === 'user' ? 'You' : 'AMICA';
+  bubble.appendChild(label);
+
+  const content = document.createElement('div');
+  content.textContent = text;
+  bubble.appendChild(content);
+
+  if (role === 'amica') {
+    lastAmicaMessage = text;
+  }
+
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  container.scrollTop = container.scrollHeight;
+  return content; // return for streaming updates
+}
+
+function showTyping() {
+  const container = document.getElementById('chat-messages');
+  const wrapper = document.createElement('div');
+  wrapper.style.display = 'flex';
+  wrapper.style.alignItems = 'flex-start';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg msg-amica';
+  bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendMessage() {
+  if (isSending) return;
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  appendMessage('user', text);
+  conversationHistory.push({ role: 'user', content: text });
+
+  isSending = true;
+  setStatus('Thinking…', true);
+  document.getElementById('btn-send').disabled = true;
+  showTyping();
+
+  try {
+    // Try streaming first
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: conversationHistory, stream: true }),
+    });
+
+    if (!response.ok) throw new Error('Server error');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    // Remove typing indicator, add streaming bubble
+    const container = document.getElementById('chat-messages');
+    const typing = container.querySelector('.typing-dots');
+    if (typing) typing.parentElement.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.alignItems = 'flex-start';
+    const bubble = document.createElement('div');
+    bubble.className = 'msg msg-amica';
+    const label = document.createElement('div');
+    label.className = 'msg-name';
+    label.textContent = 'AMICA';
+    bubble.appendChild(label);
+    const content = document.createElement('div');
+    bubble.appendChild(content);
+    wrapper.appendChild(bubble);
+    container.appendChild(wrapper);
+
+    let fullText = '';
+    setStatus('Responding…', true);
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') break;
+          try {
+            const obj = JSON.parse(data);
+            if (obj.token) {
+              fullText += obj.token;
+              content.textContent = fullText;
+              container.scrollTop = container.scrollHeight;
+            }
+          } catch (e) { /* skip */ }
+        }
+      }
+    }
+
+    lastAmicaMessage = fullText;
+    conversationHistory.push({ role: 'assistant', content: fullText });
+
+    // Auto-speak if voice mode was used
+    if (isRecording || document.getElementById('btn-speak').classList.contains('active')) {
+      speakText(fullText);
+    }
+
+  } catch (err) {
+    const container = document.getElementById('chat-messages');
+    const typing = container.querySelector('.typing-dots');
+    if (typing) typing.parentElement.remove();
+    appendMessage('amica', "I'm sorry, I had a little trouble responding just then. Please try again.");
+    console.error(err);
+  }
+
+  isSending = false;
+  setStatus('Ready');
+  document.getElementById('btn-send').disabled = false;
+}
+
+// Enter to send (but Shift+Enter for newline)
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+  // Auto-grow textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+});
+
+function setStatus(text, thinking = false) {
+  const badge = document.getElementById('chat-status-badge');
+  badge.textContent = text;
+  badge.className = 'chat-status' + (thinking ? ' thinking' : '');
+}
+
+// ── Voice Input (Web Speech API) ─────────────────────────
+function toggleMic() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast("Voice input isn't available on this browser. Please type instead.");
+    return;
+  }
+  if (isRecording) {
+    stopMic();
+  } else {
+    startMic();
+  }
+}
+
+function startMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-GB';
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    isRecording = true;
+    document.getElementById('btn-mic').classList.add('recording');
+    document.getElementById('mic-label').textContent = 'Listening…';
+    document.getElementById('chat-input').placeholder = 'Listening — speak now…';
+  };
+
+  recognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    document.getElementById('chat-input').value = transcript;
+  };
+
+  recognition.onend = () => {
+    isRecording = false;
+    document.getElementById('btn-mic').classList.remove('recording');
+    document.getElementById('mic-label').textContent = 'Speak';
+    document.getElementById('chat-input').placeholder = 'Type your message here…';
+    // Auto-send if we got something
+    const text = document.getElementById('chat-input').value.trim();
+    if (text) sendMessage();
+  };
+
+  recognition.onerror = (event) => {
+    isRecording = false;
+    document.getElementById('btn-mic').classList.remove('recording');
+    document.getElementById('mic-label').textContent = 'Speak';
+    if (event.error === 'no-speech') {
+      showToast("I didn't hear anything. Please try again.");
+    }
+  };
+
+  recognition.start();
+}
+
+function stopMic() {
+  if (recognition) recognition.stop();
+}
+
+// ── Text to Speech ────────────────────────────────────────
+function speakLast() {
+  if (lastAmicaMessage) speakText(lastAmicaMessage);
+}
+
+function speakText(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'en-GB';
+  utter.rate = 0.88;   // Slightly slower for elderly users
+  utter.pitch = 1.0;
+  utter.volume = 1.0;
+
+  // Prefer a warm UK female voice if available
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v =>
+    v.lang.startsWith('en') && v.name.toLowerCase().includes('female')
+  ) || voices.find(v =>
+    v.lang === 'en-GB'
+  ) || voices[0];
+  if (preferred) utter.voice = preferred;
+
+  window.speechSynthesis.speak(utter);
+}
+
+// ── Memory View ───────────────────────────────────────────
+async function loadMemoryView() {
+  const body = document.getElementById('mem-body');
+  try {
+    const r = await fetch('/api/memory');
+    const mem = await r.json();
+    body.innerHTML = buildMemoryHTML(mem);
+  } catch (e) {
+    body.innerHTML = '<div class="mem-empty">Could not load memory right now.</div>';
+  }
+}
+
+function buildMemoryHTML(mem) {
+  let html = '';
+
+  // Profile
+  const profile = mem.profile || {};
+  if (profile.notes) {
+    html += section('About You', `<div class="mem-item"><div class="mem-item-detail">${esc(profile.notes)}</div></div>`);
+  }
+
+  // Upcoming events
+  const events = mem.upcoming_events || [];
+  if (events.length > 0) {
+    html += section('📅 Upcoming Events', events.map(e => `
+      <div class="mem-item">
+        <div class="mem-item-name">${esc(e.description)}</div>
+        <div class="mem-item-detail">${formatEventDate(e.date)}</div>
+      </div>
+    `).join(''));
+  } else {
+    html += section('📅 Upcoming Events', '<div class="mem-empty">No upcoming events saved.</div>');
+  }
+
+  // Medications
+  const meds = mem.medications || [];
+  if (meds.length > 0) {
+    html += section('💊 Medicines', meds.map(m => `
+      <div class="mem-item">
+        <div class="mem-item-name">${esc(m.name)}</div>
+        <div class="mem-item-detail">
+          ${m.dose ? esc(m.dose) + ' &nbsp;·&nbsp; ' : ''}
+          ${m.time ? 'Take ' + esc(m.time) : ''}
+          ${m.notes ? '<br>' + esc(m.notes) : ''}
+        </div>
+      </div>
+    `).join(''));
+  } else {
+    html += section('💊 Medicines', '<div class="mem-empty">No medicines saved yet.</div>');
+  }
+
+  // Family and friends
+  const people = mem.family_and_friends || [];
+  if (people.length > 0) {
+    html += section('👨‍👩‍👧 Family & Friends', people.map(p => `
+      <div class="mem-item">
+        <div class="mem-item-name">${esc(p.name)} ${p.relation ? '<span class="mem-badge">' + esc(p.relation) + '</span>' : ''}</div>
+        <div class="mem-item-detail">
+          ${p.traits ? esc(p.traits) : ''}
+          ${p.recent_visits && p.recent_visits.length ? '<br>Last visit: ' + esc(p.recent_visits[p.recent_visits.length-1]) : ''}
+        </div>
+      </div>
+    `).join(''));
+  } else {
+    html += section('👨‍👩‍👧 Family & Friends', '<div class="mem-empty">No people saved yet.</div>');
+  }
+
+  // Recent notes
+  const notes = (mem.recent_notes || []).slice(-5).reverse();
+  if (notes.length > 0) {
+    html += section('📝 Recent Notes', notes.map(n => `
+      <div class="mem-item">
+        <div class="mem-badge">${esc(n.date)}</div>
+        <div class="mem-item-detail">${esc(n.content)}</div>
+      </div>
+    `).join(''));
+  }
+
+  return html;
+}
+
+function section(title, content) {
+  return `
+    <div class="card">
+      <div class="mem-section-title">${title}</div>
+      ${content}
+    </div>
+  `;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+// ── Toast ─────────────────────────────────────────────────
+function showToast(msg, duration = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+// ── Utils ─────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
