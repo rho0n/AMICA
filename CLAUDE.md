@@ -33,19 +33,21 @@
 | **Client** | Any phone browser — no app, no install required |
 
 ### Actual Performance (measured on device)
-- Without system prompt: ~1.88 tokens/second (measured 2026-05-16)
-- With AMICA system prompt (~308 tokens): ~1.77 tokens/second
-- Prompt processing: ~358ms/token → 308-token prompt takes ~25s before first token
-- Typical response time: 25s (prompt) + 10-20s (generation) = ~35-45s total
-- CPU features: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid — NO asimddp, no SVE, no i8mm. Cannot be improved by recompiling.
+- Prompt processing: ~349ms/token
+- Generation: ~565ms/token (~1.77 tok/s)
+- System prompt ~180 tokens → ~63s prompt processing before first token
+- Typical total response time: 63s (prompt) + 40-51s (generation) = ~90-115s
+- `max_tokens: 90` — caps generation at ~51s worst case
+- CPU features: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid — NO asimddp, no SVE, no i8mm
 - RAM at idle: 593MB used, 3.0GB available, 1.8GB swap
+- Generation speed varies noticeably — the Cortex-A53 frequency-scales up after load starts (chip "warming up"). First response of a session is slower.
 
 ### SSH Access
 - User: `arduino`, password: `password`
 - Use `sshpass -e` with `SSHPASS=password` env var for non-interactive scripts
 - **Never use `pkill -f <string>` over SSH if `<string>` appears in the SSH command itself** — it kills the SSH session. Use `fuser -k 8080/tcp` to kill by port instead.
 - Kill llama-server: `echo 'password' | sudo -S fuser -k 8080/tcp`
-- Kill uvicorn: `pkill -f uvicorn` is safe (no "uvicorn" in the SSH command string itself... unless you pass it inline)
+- Kill uvicorn: `pkill -f uvicorn` is safe
 - **Testing SSE over SSH**: do NOT pipe curl output directly — the SSH pseudo-TTY swallows SSE newlines. Always redirect: `curl ... > /tmp/out.txt; cat /tmp/out.txt`
 
 ---
@@ -54,16 +56,57 @@
 
 ```
 Arduino UNO Q 4GB (Debian Linux)
-  llama-server (port 8080)
+  llama-server (port 8080, localhost only)
     /home/arduino/amica/models/google_gemma-4-E2B-it-Q4_K_M.gguf
   amica_server.py (FastAPI, port 5000)
     ~/amica/venv (Python virtualenv)
     Reads memory.json, builds system prompt
-    Proxies and streams to llama-server
+    POST /api/chat/queue  → starts inference background task, returns job_id
+    GET  /api/chat/stream/{job_id} → EventSource SSE stream (iOS Safari compatible)
+    POST /api/chat  → legacy non-streaming fallback
+    GET  /family    → family/carer portal (edit memory, people, meds, events)
     Serves static/index.html to phones
-  Wi-Fi hotspot: "AMICA" / 10.42.0.1 (NOT YET CONFIGURED)
-  Currently accessible at: 192.168.1.156 on home Wi-Fi
+  Wi-Fi hotspot: "AMICA" / "amica2024", board at 10.42.0.1
+  Development access: 192.168.1.156 on home Wi-Fi (IP may change)
 ```
+
+### Streaming architecture (EventSource pattern)
+iOS Safari does not support incremental `fetch` ReadableStream or XHR `onprogress`.
+The working solution uses the native `EventSource` API (GET-based SSE):
+1. Client POSTs `/api/chat/queue` → gets `job_id` back in <1s
+2. Client opens `new EventSource('/api/chat/stream/{job_id}')` — GET request
+3. Server streams tokens as they arrive from llama-server
+4. Client appends tokens to a live bubble — word-by-word visual effect
+5. SSE keepalive comments (`: keepalive\n\n`) sent every 15s to prevent connection drop during the ~63s silent prompt-processing phase
+
+### Memory save architecture (three-layer cascade)
+After every chat turn, facts are saved via three independent layers — any one is sufficient:
+
+**Layer 1 — [MEM:] tag (most reliable):** The system prompt instructs Gemma to end its reply with a structured tag when it detects a save intent. Server parses the tag from `full_response` before it reaches the client. Client strips the tag from displayed text using regex. Example: `[MEM:person|Stacey|friend|likes gardening]`
+
+**Layer 2 — Regex on user message (fast fallback):** `parse_and_save_explicit_memory()` in memory_manager.py runs in two passes:
+- Pass 1: `_PERSON_RE`, `_MET_PERSON_RE`, `_MED_RE` on whole message — **no trigger word needed**. This catches misspelled triggers ("rememeber"). `_PERSON_RE` requires known relation word + Title Case name in Pass 1 to avoid false positives.
+- Pass 2: `_EXPLICIT_TRIGGERS` regex → extract fact → run all extractors (med, person, event, profile note).
+
+**Layer 3 — Background LLM extraction (last resort):** If layers 1 and 2 both miss, an async task fires 3s later (only if llama-server is idle) with a compact JSON extraction prompt. Result merged via `merge_extracted_facts()`.
+
+### Memory tag format
+`[MEM:person|NAME|RELATION|TRAITS]` — e.g. `[MEM:person|Stacey|friend|likes gardening]`
+`[MEM:event|YYYY-MM-DD|DESCRIPTION]` — e.g. `[MEM:event|2026-05-18|Karl visiting at 6pm]`
+`[MEM:med|NAME|DOSE|TIME]` — e.g. `[MEM:med|Metformin|500mg|morning]`
+
+### System prompt token budget
+The system prompt is built fresh every turn by `build_system_prompt()` in memory_manager.py.
+Target: ~180 tokens → ~63s prompt processing + ~51s generation = ~114s, within LLAMA_TIMEOUT=125s.
+Client hard fallback: 140s (raised from 90s to match).
+
+Contents (compact format):
+- Line 1: identity + today's date + "say you/your, not name" + "2-3 sentences"
+- Line 2: "About [name]:" + profile notes (70-char truncated)
+- Meds: name + dose + time keyword only (e.g. "morning" not "one tablet with breakfast")
+- People: most-recently-updated first, up to 10, name + relation (15 chars) + traits (25 chars)
+- Events: sorted by date, up to 5 upcoming, 40-char description + relative label (today/tomorrow/in Nd)
+- MEM tag instruction: tells Gemma the tag format + today/tomorrow dates
 
 ---
 
@@ -78,27 +121,27 @@ Arduino UNO Q 4GB (Debian Linux)
 | Model | /home/arduino/amica/models/google_gemma-4-E2B-it-Q4_K_M.gguf |
 | Memory file | /home/arduino/amica/memory.json |
 | Phone UI | /home/arduino/amica/static/index.html |
+| Family portal | /home/arduino/amica/static/family.html |
 
 ---
 
-## How to Start Everything Manually (systemd NOT set up yet)
+## How to Start Everything Manually
 
 ### Terminal 1 — llama-server
 ```bash
 sudo /root/llama.cpp/build/bin/llama-server \
   -m ~/amica/models/google_gemma-4-E2B-it-Q4_K_M.gguf \
-  --host 0.0.0.0 --port 8080 \
+  --host 127.0.0.1 --port 8080 \
   --ctx-size 2048 \
   --threads 4 \
   --n-predict 256 \
   --reasoning off
 ```
-Wait for: server is listening on http://0.0.0.0:8080
+Wait for: server is listening on http://127.0.0.1:8080
 
 **NOTE: `--reasoning off` is required.** Gemma 4E defaults to thinking/reasoning mode, emitting
 all tokens as `delta.reasoning_content` before any `delta.content`. Without this flag, the model
 can spend 100-200 tokens (60-120 seconds) in a silent thinking phase before the first visible word.
-With `--reasoning off`, tokens flow directly as `delta.content` from the first generation step.
 
 ### Terminal 2 — Python API
 ```bash
@@ -110,47 +153,66 @@ uvicorn amica_server:app --host 0.0.0.0 --port 5000
 ### Health checks
 ```bash
 curl http://localhost:8080/health
-# should return {"status":"ok"}
 curl http://localhost:5000/api/health
-# should return {"amica":"ok","llama_server":"ready","user":"Margaret"}
 ```
 
-### Phone access (currently)
-Phone on same home Wi-Fi → browser → http://192.168.1.156:5000
+### Auto-start (systemd)
+Services start automatically on boot with no SSH needed.
+```bash
+sudo systemctl status amica-llama amica-api
+sudo journalctl -u amica-llama -f
+sudo journalctl -u amica-api -f
+```
+
+### Phone access — home Wi-Fi mode (development)
+Phone on same home Wi-Fi → browser → `http://192.168.1.156:5000`
+
+### Phone access — hotspot mode (demo / fully offline)
+```
+Phone: connect to Wi-Fi "AMICA", password "amica2024"
+Browser: http://10.42.0.1:5000
+Family portal: http://10.42.0.1:5000/family
+```
+
+To switch back to home WiFi temporarily (for deploying updates):
+- Connect Mac to "AMICA" WiFi → `ssh arduino@10.42.0.1` → `bash ~/amica/hotspot-off.sh`
+
+### Deploying updates
+```bash
+bash deploy.sh   # tries 192.168.1.156 then 10.42.0.1
+```
+deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the service.
 
 ---
 
 ## Current Status
 
-### WORKING (as of 2026-05-16)
+### WORKING (as of 2026-05-17) — MVP complete
 - llama-server running Gemma 4 E2B on UNO Q CPU with `--reasoning off`
-- FastAPI server serving UI and proxying to llama-server
-- Memory system loading Margaret's profile — system prompt trimmed to ~308 tokens
-- **SSE streaming confirmed working** — tokens arrive word-by-word in browser (verified via file-redirect curl test on localhost)
-- Phone UI loads correctly on laptop and phone (same Wi-Fi)
-- Health endpoints returning correct status
-- "Reply in 2-3 sentences maximum" baked into system prompt
+- Token-by-token streaming on iOS Safari via EventSource queue/stream pattern
+- Phone UI confirmed working on home Wi-Fi and AMICA hotspot
+- Systemd auto-start — works out of the box at boot, no SSH needed
+- Wi-Fi hotspot "AMICA" / "amica2024", board at 10.42.0.1
+- **Memory saving from chat — confirmed working end-to-end:**
+  - Three-layer cascade: [MEM:] tag → regex → background LLM
+  - New people, medications, events saved reliably from natural chat
+  - Traits saved (e.g. "likes gardening") and recalled in subsequent chats
+  - Typo-tolerant ("rememeber", "tomorrwo") — Pass 1 runs before trigger check
+  - [MEM:] tag stripped from displayed text (complete and partial tags during streaming)
+- **Family portal (/family) — confirmed working:**
+  - Add/edit/delete people, medications, events, profile
+  - People sorted by most-recently-updated so new additions always show in system prompt (up to 10)
+  - Portal saves appear in AMICA's next chat immediately (load_memory() reads fresh every turn)
+- Memory recall in new chats — all saved facts appear in system prompt
+- AMICA always says "you/your" — never uses the user's name in third person
+- Profile notes: only saved when there's an explicit trigger word (prevents casual "I" statements polluting profile)
 
-### BROKEN — FIX THESE NEXT
-
-**1. Wi-Fi hotspot not configured (PRIORITY 1 for offline demo)**
-Phone currently needs home Wi-Fi. For offline use, UNO Q needs its own "AMICA" access point.
-First check Wi-Fi interface name: iw dev
-Then: sudo apt-get install -y hostapd dnsmasq
-Configure hostapd for SSID "AMICA", password "amica2024", static IP 10.42.0.1
-
-**2. Systemd services not set up (PRIORITY 1)**
-Both processes die when SSH closes. Need systemd units for auto-start on boot.
-setup_amica.sh has the definitions but was never fully run.
-The llama-server systemd unit MUST include `--reasoning off` in the ExecStart line.
-
-**3. ~25 second wait before first token (PRIORITY 2)**
-The 308-token system prompt takes ~25s of prompt processing before any word appears. The UI
-already has a typing indicator (dots animation) that shows immediately on send — this helps. But
-for the demo, consider further trimming the system prompt or caching the KV state.
-
-**4. Google Fonts CDN in index.html (PRIORITY 3)**
-Falls back to Georgia when offline. Fine functionally, fix for polish.
+### KNOWN ISSUES / ACCEPTED TRADE-OFFS
+- **~63s wait before first token** — system prompt ~180 tokens × 349ms. UI shows animated dots + "Still thinking…" / "Almost there…" messages. Accepted for demo.
+- **Variable generation speed** — Cortex-A53 frequency-scales after load starts. First response of a session is noticeably slower. Expected hardware behaviour.
+- **Google Fonts CDN in index.html** — falls back to Georgia when offline. Cosmetic only.
+- **In-chat editing/deleting not supported** — chat can ADD to memory but not remove. Use /family portal to correct mistakes. This is intentional (safe design for elderly users).
+- **Profile notes can accumulate garbage** — if old code ran before the has_trigger gate was added. Fix: manually edit "About them" in /family portal to remove any junk sentences.
 
 ---
 
@@ -165,35 +227,56 @@ Falls back to Georgia when offline. Fine functionally, fix for polish.
 | Parallel heavy tasks | Compile + download at same time killed both. Do one at a time on this board. |
 | huggingface-cli | Deprecated. Use ~/.local/bin/hf instead. |
 | pip without --break-system-packages | Debian blocks it. Use venv or add the flag. |
-| httpx `aiter_lines()` for SSE streaming | Buffers internally — tokens arrive in bursts not individually. Use `aiter_bytes()` with manual line splitting instead (current implementation). |
-| Running llama-server without `--reasoning off` | Gemma 4E thinking mode emits 100-200 `reasoning_content` tokens silently before any `content` token. Parser sees nothing for 60-120s then all text at once. Always use `--reasoning off`. |
-| `pkill -f <string>` over SSH when string is in command | Kills the SSH session itself. Use `fuser -k PORT/tcp` to kill by port. |
-| Testing SSE by piping curl over SSH | SSH pseudo-TTY swallows SSE newline formatting. Always redirect: `curl ... > /tmp/out.txt` then read the file. |
+| httpx `aiter_lines()` for SSE streaming | Buffers internally — tokens arrive in bursts. Use `aiter_bytes()` with manual `\n` splitting. |
+| Running llama-server without `--reasoning off` | Gemma 4E thinking mode: 100-200 silent `reasoning_content` tokens before any `content`. 60-120s silence then all text at once. Always use `--reasoning off`. |
+| `pkill -f <string>` over SSH when string is in command | Kills the SSH session. Use `fuser -k PORT/tcp`. |
+| Testing SSE by piping curl over SSH | SSH pseudo-TTY swallows SSE newline formatting. Always redirect to file then cat. |
 | `budget_tokens: 0` API param to disable thinking | Llama-server ignores it. Must use `--reasoning off` server flag. |
+| `fetch` ReadableStream for SSE on iOS Safari | Does not deliver chunks incrementally. Perpetual dots. |
+| XHR `onprogress` for streaming on iOS Safari | Same — does not stream progressively on iOS Safari. |
+| `max_tokens: 256` | 144s worst-case — exceeds browser timeouts. Use 90 (~51s max). |
+| Regex-only memory extraction | Misspelled trigger words ("rememeber") caused `return False` before person detection. Fixed by Pass 1 / Pass 2 restructure. |
+| Profile note fallback without trigger gate | Saved every "I …" statement as a profile note, polluting the "About them" field with chat content. Fixed by gating fallback behind `has_trigger`. |
+| Client hard fallback at 90s | With ~180-token system prompt, prompt processing takes ~63s. 90s was too close to first-token arrival. Raised to 140s. |
 
 ---
 
 ## Planned / Not Yet Built
 
-### Priority 1 — Done ✓
+### Done ✓
 - [x] Fix SSE streaming — `aiter_bytes()` + `--reasoning off` on llama-server
-- [x] Trim system prompt to ~308 tokens (from 700+)
-- [x] Short response enforcement — "Reply in 2-3 sentences maximum" in system prompt
-- [x] Typing indicator already present in UI (dots animation)
+- [x] Compact system prompt (~180 tokens)
+- [x] Token-by-token visual streaming on iOS Safari — EventSource queue/stream pattern
+- [x] Works out of the box at boot — no SSH needed
+- [x] Wi-Fi hotspot — "AMICA" / amica2024, board at 10.42.0.1:5000
+- [x] Systemd auto-start with boot race condition fixed
+- [x] Family portal at /family — guardian web form to add/edit/delete everything
+- [x] Three-layer memory save cascade — [MEM:] tag + regex (Pass 1/2) + background LLM
+- [x] Voice input — webkitSpeechRecognition mic button, works on iOS Safari
+- [x] AMICA says "you/your" not third-person name
+- [x] Traits saved and recalled for people
+- [x] People sorted by recency, 10-person cap
 
-### Priority 2 — Needed for proper demo
-- [ ] Wi-Fi hotspot (AMICA network, offline)
-- [ ] Systemd auto-start services (must include `--reasoning off` in llama-server unit)
-
-### Priority 3 — Strong for hackathon score
+### Remaining / Stretch
+- [ ] Demo video (3 min max, YouTube) — story: elderly person, kitchen table, phone, privacy
+- [ ] Kaggle Writeup (1500 words max) — select llama.cpp track + Digital Equity track
+- [ ] Public GitHub repo
+- [ ] Cover image for media gallery
+- [ ] **Submit before May 19, 2026 at 12:59 AM GMT+1**
+- [ ] Camera vision (see notes below)
 - [ ] Quick-reply buttons: "What's on this week?" / "My medicines" / "Who's visiting?"
 - [ ] Auto-speak AMICA responses (voice on by default)
-- [ ] Family setup portal at /setup — web form to edit memory.json
-
-### Priority 4 — Stretch
-- [ ] Camera: phone photo → AMICA describes it (meds label, family photo). E2B supports vision natively.
-- [ ] Memory auto-update: AMICA writes new facts back to memory.json
 - [ ] Proactive medication reminders
+
+### Camera / Vision notes
+Gemma 4 E2B is natively multimodal and llama.cpp supports vision via a `--mmproj` file.
+**What's needed:**
+1. Download the Gemma 4E mmproj GGUF from HuggingFace (separate file, ~300-500MB)
+2. Restart llama-server with `--mmproj /path/to/mmproj.gguf`
+3. Phone UI: `<input type="file" accept="image/*" capture="camera">` → base64 encode → send as vision message in the chat completions payload
+4. Server: include `{"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}` in the messages array
+
+**RAM concern:** model is 3.22GB, board has 4GB total. mmproj adds ~300-500MB — very tight. May need to reduce `--ctx-size` from 2048 to 1024 to free headroom. Test carefully before demo.
 
 ---
 
@@ -202,27 +285,22 @@ Falls back to Georgia when offline. Fine functionally, fix for polish.
 | Decision | Rationale |
 |---|---|
 | llama.cpp not Ollama | llama.cpp Special Track ($10k) — more specific, less competition |
-| E2B not E4B | 4GB RAM hard limit. E2B Q4_K_M is 3.22GB — fits with ~800MB headroom |
-| CPU-only, no Vulkan | SPIR-V headers missing from Debian image, not worth fighting. Future optimisation. |
+| E2B not E4B | 4GB RAM hard limit. E2B Q4_K_M is 3.22GB — fits with ~780MB headroom |
+| CPU-only, no Vulkan | SPIR-V headers missing from Debian image, not worth fighting |
 | Browser UI not native app | Universal (any phone, no install), faster to build, easier to demo |
-| Slow responses are okay | 35-45s is borderline but acceptable — "thoughtful pause" framing. Short prompts help. |
+| Slow responses are okay | 60-115s is long but acceptable — "thoughtful pause" framing. Short prompts help. |
 | memory.json not a DB | Simple, editable by family, no dependencies |
-| `--reasoning off` on llama-server | Gemma 4E thinking mode uses 100-200 silent tokens before any visible output. Disabling it cuts first-token latency by 60-120 seconds. llama-server v1 (build 1348f67) supports `--reasoning [on\|off\|auto]`. |
-| `aiter_bytes()` not `aiter_lines()` in httpx | `aiter_lines()` has internal buffering that holds back SSE lines. `aiter_bytes()` with manual `\n` splitting forwards each token immediately. |
-| System prompt under 350 tokens | Each token in the prompt costs ~358ms of processing time on this hardware. 308 tokens = ~25s latency. 700 tokens (old) = ~50s latency before first word. |
-
----
-
-## Hackathon Submission Checklist
-
-- [x] Fix streaming + trim system prompt
-- [ ] Wi-Fi hotspot working
-- [ ] Systemd services
-- [ ] Demo video (3 min max, YouTube) — story: elderly person, kitchen table, phone, privacy
-- [ ] Kaggle Writeup (1500 words max) — select llama.cpp track + Digital Equity track
-- [ ] Public GitHub repo
-- [ ] Cover image for media gallery
-- [ ] Submit before May 19, 2026 at 12:59 AM GMT+1
+| `--reasoning off` on llama-server | Gemma 4E thinking mode: 100-200 silent tokens before visible output. Disabling cuts first-token latency by 60-120s. |
+| `aiter_bytes()` not `aiter_lines()` in httpx | `aiter_lines()` has internal buffering. `aiter_bytes()` with manual `\n` splitting forwards tokens immediately. |
+| System prompt ~180 tokens | 349ms/token × 180 = 63s prompt latency. Deliberately compact — every token costs ~350ms. |
+| EventSource (GET SSE) not fetch SSE | iOS Safari's fetch ReadableStream and XHR onprogress don't stream incrementally. Native `EventSource` does. |
+| `max_tokens: 90` | 90 × ~565ms = 51s worst-case generation. Fits within 125s LLAMA_TIMEOUT. |
+| [MEM:] tag in AMICA's response | LLM reasoning detects save intent far more reliably than regex on messy user input. Tag format is controlled and consistent. Regex runs on LLM output, not user input. |
+| Pass 1 structural patterns before trigger check | Misspelled trigger words ("rememeber") used to exit before person detection. Pass 1 runs `_PERSON_RE` / `_MET_PERSON_RE` / `_MED_RE` on whole message regardless of triggers. |
+| Profile note fallback gated behind has_trigger | Bare "I …" statements (e.g. "I like climbing too") would pollute profile notes. Only save notes when user explicitly asks. |
+| People sorted by recency in system prompt | Newly added people (via chat or /family) always appear in the top 10. Oldest entries fall off rather than newest. |
+| /family portal for editing, chat for adding | Safer for elderly users — chat adds naturally, deliberate portal UI required to delete/correct. Prevents accidental deletions. |
+| LLAMA_TIMEOUT: 125s, client hard fallback: 140s | Server needs 114s worst-case; client gives 15s margin beyond that before showing timeout error. |
 
 ---
 

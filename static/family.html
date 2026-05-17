@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AMICA Family Portal</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Georgia, serif; background: #fdf6ee; color: #3a2e1f; min-height: 100vh; }
+    header {
+      background: #c97d4a; color: white; padding: 16px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 1.3rem; font-weight: normal; }
+    header small { font-size: 0.85rem; opacity: 0.8; display: block; }
+    .back-btn {
+      margin-left: auto; background: rgba(255,255,255,0.2); color: white;
+      border: 1px solid rgba(255,255,255,0.4); padding: 6px 14px;
+      border-radius: 6px; cursor: pointer; font-size: 0.9rem; text-decoration: none;
+    }
+    main { max-width: 700px; margin: 0 auto; padding: 24px 16px 60px; }
+    section {
+      background: white; border-radius: 12px; padding: 20px;
+      margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    section h2 {
+      font-size: 1.05rem; color: #c97d4a; margin-bottom: 14px;
+      padding-bottom: 8px; border-bottom: 1px solid #f0e4d4;
+    }
+    /* Display row */
+    .item {
+      border-bottom: 1px solid #f9f0e6; padding: 10px 0;
+    }
+    .item:last-of-type { border-bottom: none; }
+    .item-display { display: flex; align-items: flex-start; gap: 10px; }
+    .item-text { flex: 1; font-size: 0.95rem; line-height: 1.5; }
+    .item-text strong { color: #3a2e1f; }
+    .item-text small { color: #888; font-size: 0.8rem; display: block; }
+    .item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    /* Edit form (hidden by default) */
+    .item-edit { display: none; padding: 10px 0 6px; }
+    .item-edit.open { display: block; }
+    .item-display.hidden { display: none; }
+    /* Buttons */
+    .btn {
+      border-radius: 6px; padding: 5px 11px; cursor: pointer;
+      font-size: 0.8rem; border: 1px solid; white-space: nowrap;
+    }
+    .btn-edit  { background: none; border-color: #d4b896; color: #a06030; }
+    .btn-del   { background: none; border-color: #e0c4b0; color: #c97d4a; }
+    .btn-save  { background: #c97d4a; border-color: #c97d4a; color: white; }
+    .btn-cancel{ background: none; border-color: #ccc; color: #888; }
+    .btn:hover { opacity: 0.8; }
+    /* Add form */
+    .add-form {
+      margin-top: 14px; padding-top: 14px; border-top: 1px solid #f0e4d4;
+      display: grid; gap: 8px;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 120px; }
+    input, textarea {
+      width: 100%; padding: 8px 11px; border: 1px solid #ddd;
+      border-radius: 8px; font-size: 0.9rem; font-family: Georgia, serif;
+      background: #fdfaf6;
+    }
+    textarea { resize: vertical; min-height: 56px; }
+    label { font-size: 0.8rem; color: #888; display: block; margin-bottom: 3px; }
+    .add-btn {
+      background: #c97d4a; color: white; border: none; border-radius: 8px;
+      padding: 9px 18px; cursor: pointer; font-size: 0.9rem; font-family: Georgia, serif;
+    }
+    .add-btn:hover { background: #b56a39; }
+    .edit-grid { display: grid; gap: 6px; }
+    .edit-actions { display: flex; gap: 6px; margin-top: 6px; }
+    .empty { color: #bbb; font-size: 0.9rem; font-style: italic; padding: 6px 0; }
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #3a2e1f; color: white; padding: 10px 22px; border-radius: 20px;
+      font-size: 0.9rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>AMICA Family Portal</h1>
+    <small>Manage memory for your loved one</small>
+  </div>
+  <a href="/" class="back-btn">← Chat</a>
+</header>
+
+<main>
+
+  <!-- Profile -->
+  <section>
+    <h2>Profile</h2>
+    <div class="edit-grid">
+      <div><label>Name</label><input id="profile-name" type="text" placeholder="e.g. Margaret"></div>
+      <div><label>About them</label><textarea id="profile-notes" placeholder="e.g. Retired teacher, loves gardening, has two cats"></textarea></div>
+    </div>
+    <div style="margin-top:10px"><button class="add-btn" onclick="saveProfile()">Save Profile</button></div>
+  </section>
+
+  <!-- Medications -->
+  <section>
+    <h2>Medications</h2>
+    <div id="meds-list"></div>
+    <div class="add-form">
+      <div class="row">
+        <div><label>Medicine name</label><input id="med-name" type="text" placeholder="e.g. Aspirin"></div>
+        <div><label>Dose</label><input id="med-dose" type="text" placeholder="e.g. 75mg"></div>
+        <div><label>Time</label><input id="med-time" type="text" placeholder="e.g. morning"></div>
+      </div>
+      <button class="add-btn" onclick="addMed()">Add Medication</button>
+    </div>
+  </section>
+
+  <!-- People -->
+  <section>
+    <h2>Family &amp; Friends</h2>
+    <div id="people-list"></div>
+    <div class="add-form">
+      <div class="row">
+        <div><label>Name</label><input id="person-name" type="text" placeholder="e.g. James"></div>
+        <div><label>Relationship</label><input id="person-rel" type="text" placeholder="e.g. son"></div>
+      </div>
+      <div><label>About them</label><input id="person-traits" type="text" placeholder="e.g. Lives in Bristol, calls every Sunday"></div>
+      <button class="add-btn" onclick="addPerson()">Add Person</button>
+    </div>
+  </section>
+
+  <!-- Events -->
+  <section>
+    <h2>Upcoming Events</h2>
+    <div id="events-list"></div>
+    <div class="add-form">
+      <div class="row">
+        <div style="flex:0 0 160px"><label>Date</label><input id="event-date" type="date"></div>
+        <div><label>Description</label><input id="event-desc" type="text" placeholder="e.g. Doctor appointment at 10am"></div>
+      </div>
+      <button class="add-btn" onclick="addEvent()">Add Event</button>
+    </div>
+  </section>
+
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let memory = {};
+
+async function load() {
+  const r = await fetch('/api/memory');
+  memory = await r.json();
+  render();
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg, long) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), long ? 4000 : 2500);
+}
+
+function saved(what) {
+  toast(`${what} saved. Tap "New chat" in AMICA for her to use the updated information.`, true);
+}
+
+// ── Render ──────────────────────────────────────────────────
+
+function render() {
+  document.getElementById('profile-name').value  = memory.profile?.name  || '';
+  document.getElementById('profile-notes').value = memory.profile?.notes || '';
+  renderMeds();
+  renderPeople();
+  renderEvents();
+}
+
+function renderMeds() {
+  const meds = memory.medications || [];
+  const el = document.getElementById('meds-list');
+  if (!meds.length) { el.innerHTML = '<div class="empty">No medications saved yet.</div>'; return; }
+  el.innerHTML = meds.map((m, i) => `
+    <div class="item" id="med-item-${i}">
+      <div class="item-display" id="med-display-${i}">
+        <div class="item-text">
+          <strong>${esc(m.name)}</strong>${m.dose?' — '+esc(m.dose):''}${m.time?' ('+esc(m.time)+')':''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-edit" onclick="editMed(${i})">Edit</button>
+          <button class="btn btn-del"  onclick="delMed(${i},'${esc(m.name)}')">Remove</button>
+        </div>
+      </div>
+      <div class="item-edit" id="med-edit-${i}">
+        <div class="row">
+          <div><label>Name</label><input id="med-e-name-${i}" value="${esc(m.name)}"></div>
+          <div><label>Dose</label><input id="med-e-dose-${i}" value="${esc(m.dose||'')}"></div>
+          <div><label>Time</label><input id="med-e-time-${i}" value="${esc(m.time||'')}"></div>
+        </div>
+        <div class="edit-actions">
+          <button class="btn btn-save"   onclick="saveMed(${i},'${esc(m.name)}')">Save</button>
+          <button class="btn btn-cancel" onclick="cancelEdit('med',${i})">Cancel</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderPeople() {
+  const people = memory.family_and_friends || [];
+  const el = document.getElementById('people-list');
+  if (!people.length) { el.innerHTML = '<div class="empty">No people saved yet.</div>'; return; }
+  el.innerHTML = people.map((p, i) => `
+    <div class="item" id="person-item-${i}">
+      <div class="item-display" id="person-display-${i}">
+        <div class="item-text">
+          <strong>${esc(p.name)}</strong>${p.relation?' ('+esc(p.relation)+')':''}
+          ${p.traits?'<small>'+esc(p.traits)+'</small>':''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-edit" onclick="editPerson(${i})">Edit</button>
+          <button class="btn btn-del"  onclick="delPerson(${i},'${esc(p.name)}')">Remove</button>
+        </div>
+      </div>
+      <div class="item-edit" id="person-edit-${i}">
+        <div class="edit-grid">
+          <div class="row">
+            <div><label>Name</label><input id="person-e-name-${i}" value="${esc(p.name)}"></div>
+            <div><label>Relationship</label><input id="person-e-rel-${i}" value="${esc(p.relation||'')}"></div>
+          </div>
+          <div><label>About them</label><input id="person-e-traits-${i}" value="${esc(p.traits||'')}"></div>
+        </div>
+        <div class="edit-actions">
+          <button class="btn btn-save"   onclick="savePerson(${i},'${esc(p.name)}')">Save</button>
+          <button class="btn btn-cancel" onclick="cancelEdit('person',${i})">Cancel</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderEvents() {
+  const events = memory.upcoming_events || [];
+  const el = document.getElementById('events-list');
+  if (!events.length) { el.innerHTML = '<div class="empty">No events saved yet.</div>'; return; }
+  el.innerHTML = events.map((e, i) => `
+    <div class="item" id="event-item-${i}">
+      <div class="item-display" id="event-display-${i}">
+        <div class="item-text">
+          <strong>${esc(e.description)}</strong>
+          ${e.date?'<small>'+esc(e.date)+'</small>':''}
+        </div>
+        <div class="item-actions">
+          <button class="btn btn-edit" onclick="editEvent(${i})">Edit</button>
+          <button class="btn btn-del"  onclick="delEvent(${i})">Remove</button>
+        </div>
+      </div>
+      <div class="item-edit" id="event-edit-${i}">
+        <div class="row">
+          <div style="flex:0 0 160px"><label>Date</label><input type="date" id="event-e-date-${i}" value="${esc(e.date||'')}"></div>
+          <div><label>Description</label><input id="event-e-desc-${i}" value="${esc(e.description||'')}"></div>
+        </div>
+        <div class="edit-actions">
+          <button class="btn btn-save"   onclick="saveEvent(${i})">Save</button>
+          <button class="btn btn-cancel" onclick="cancelEdit('event',${i})">Cancel</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+
+// ── Toggle edit mode ────────────────────────────────────────
+
+function editMed(i)    { openEdit('med', i); }
+function editPerson(i) { openEdit('person', i); }
+function editEvent(i)  { openEdit('event', i); }
+
+function openEdit(type, i) {
+  document.getElementById(`${type}-display-${i}`).classList.add('hidden');
+  document.getElementById(`${type}-edit-${i}`).classList.add('open');
+}
+
+function cancelEdit(type, i) {
+  document.getElementById(`${type}-display-${i}`).classList.remove('hidden');
+  document.getElementById(`${type}-edit-${i}`).classList.remove('open');
+}
+
+// ── Save edits ──────────────────────────────────────────────
+
+async function saveMed(i, oldName) {
+  const name  = document.getElementById(`med-e-name-${i}`).value.trim();
+  const dose  = document.getElementById(`med-e-dose-${i}`).value.trim();
+  const time  = document.getElementById(`med-e-time-${i}`).value.trim();
+  if (!name) { toast('Name cannot be empty.'); return; }
+  if (name.toLowerCase() !== oldName.toLowerCase()) {
+    await fetch('/api/memory/medication/' + encodeURIComponent(oldName), {method:'DELETE'});
+  }
+  await fetch('/api/memory/medication', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, dose, time})});
+  await load(); saved('Medication');
+}
+
+async function savePerson(i, oldName) {
+  const name   = document.getElementById(`person-e-name-${i}`).value.trim();
+  const rel    = document.getElementById(`person-e-rel-${i}`).value.trim();
+  const traits = document.getElementById(`person-e-traits-${i}`).value.trim();
+  if (!name) { toast('Name cannot be empty.'); return; }
+  if (name.toLowerCase() !== oldName.toLowerCase()) {
+    await fetch('/api/memory/person/' + encodeURIComponent(oldName), {method:'DELETE'});
+  }
+  await fetch('/api/memory/person', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, relation:rel, traits})});
+  await load(); saved('Person');
+}
+
+async function saveEvent(i) {
+  const date = document.getElementById(`event-e-date-${i}`).value;
+  const desc = document.getElementById(`event-e-desc-${i}`).value.trim();
+  if (!desc) { toast('Description cannot be empty.'); return; }
+  await fetch('/api/memory/event/' + i, {method:'DELETE'});
+  await fetch('/api/memory/event', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({date, description:desc})});
+  await load(); saved('Event');
+}
+
+// ── Delete ──────────────────────────────────────────────────
+
+async function delMed(i, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  await fetch('/api/memory/medication/' + encodeURIComponent(name), {method:'DELETE'});
+  await load(); toast('Medication removed.');
+}
+
+async function delPerson(i, name) {
+  if (!confirm(`Remove ${name}?`)) return;
+  await fetch('/api/memory/person/' + encodeURIComponent(name), {method:'DELETE'});
+  await load(); toast('Person removed.');
+}
+
+async function delEvent(i) {
+  if (!confirm('Remove this event?')) return;
+  await fetch('/api/memory/event/' + i, {method:'DELETE'});
+  await load(); toast('Event removed.');
+}
+
+// ── Add new ─────────────────────────────────────────────────
+
+async function saveProfile() {
+  const name  = document.getElementById('profile-name').value.trim();
+  const notes = document.getElementById('profile-notes').value.trim();
+  if (!name) { toast('Please enter a name.'); return; }
+  await fetch('/api/memory/profile', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, notes})});
+  await load(); saved('Profile');
+}
+
+async function addMed() {
+  const name = document.getElementById('med-name').value.trim();
+  if (!name) { toast('Please enter a medication name.'); return; }
+  const dose = document.getElementById('med-dose').value.trim();
+  const time = document.getElementById('med-time').value.trim();
+  await fetch('/api/memory/medication', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, dose, time})});
+  ['med-name','med-dose','med-time'].forEach(id => document.getElementById(id).value = '');
+  await load(); saved('Medication');
+}
+
+async function addPerson() {
+  const name   = document.getElementById('person-name').value.trim();
+  if (!name) { toast('Please enter a name.'); return; }
+  const rel    = document.getElementById('person-rel').value.trim();
+  const traits = document.getElementById('person-traits').value.trim();
+  await fetch('/api/memory/person', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, relation:rel, traits})});
+  ['person-name','person-rel','person-traits'].forEach(id => document.getElementById(id).value = '');
+  await load(); saved('Person');
+}
+
+async function addEvent() {
+  const date = document.getElementById('event-date').value;
+  const desc = document.getElementById('event-desc').value.trim();
+  if (!desc) { toast('Please enter a description.'); return; }
+  await fetch('/api/memory/event', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({date, description:desc})});
+  ['event-date','event-desc'].forEach(id => document.getElementById(id).value = '');
+  await load(); saved('Event');
+}
+
+load();
+</script>
+</body>
+</html>

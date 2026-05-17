@@ -441,6 +441,16 @@
     border-color: var(--amber);
     color: var(--amber);
   }
+  .btn-voice:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .btn-voice.ready {
+    background: #E8F5E9;
+    border-color: #4CAF50;
+    color: #2E7D32;
+  }
   .btn-voice.recording {
     background: #FFF0F0;
     border-color: #E05555;
@@ -626,14 +636,19 @@
         <span>Talk to AMICA</span>
       </button>
 
-      <div class="card" id="card-events" style="display:none">
+      <div class="card" id="card-events">
         <div class="card-title">📅 Coming up</div>
-        <div id="events-list"></div>
+        <div id="events-list"><div style="color:var(--text-soft);font-style:italic;padding:8px 0;font-size:17px;">Loading…</div></div>
       </div>
 
-      <div class="card" id="card-meds" style="display:none">
+      <div class="card" id="card-meds">
         <div class="card-title">💊 Today's medicines</div>
-        <div id="meds-list"></div>
+        <div id="meds-list"><div style="color:var(--text-soft);font-style:italic;padding:8px 0;font-size:17px;">Loading…</div></div>
+      </div>
+
+      <div class="card" id="card-people" style="display:none">
+        <div class="card-title">👨‍👩‍👧 Family &amp; Friends</div>
+        <div id="people-list"></div>
       </div>
 
       <button class="btn-secondary" onclick="goScreen('screen-memory')">
@@ -653,7 +668,10 @@
     <div class="chat-header">
       <button class="btn-back" onclick="goScreen('screen-home')" aria-label="Go back">←</button>
       <div class="chat-header-title">AMICA</div>
-      <div class="chat-status" id="chat-status-badge">Ready</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="chat-status" id="chat-status-badge">Ready</div>
+        <button onclick="newChat()" title="Start a new conversation" style="background:none;border:1px solid rgba(255,255,255,0.4);color:white;border-radius:6px;padding:3px 10px;font-size:0.8rem;cursor:pointer;font-family:Georgia,serif">New chat</button>
+      </div>
     </div>
 
     <div class="chat-messages" id="chat-messages">
@@ -671,10 +689,7 @@
         <button class="btn-send" id="btn-send" onclick="sendMessage()" aria-label="Send message">➤</button>
       </div>
       <div class="voice-row">
-        <button class="btn-voice" id="btn-mic" onclick="toggleMic()" aria-label="Speak your message">
-          🎤 <span id="mic-label">Speak</span>
-        </button>
-        <button class="btn-voice" id="btn-speak" onclick="speakLast()" aria-label="Read last message aloud">
+        <button class="btn-voice" id="btn-speak" onclick="speakLast()" aria-label="Read last message aloud" disabled>
           🔊 Read aloud
         </button>
       </div>
@@ -806,37 +821,31 @@ async function loadProfile() {
 }
 
 function renderHomeCards(mem) {
-  // Events card
-  const events = (mem.upcoming_events || []).filter(e => {
-    const d = new Date(e.date);
-    const now = new Date();
-    return d >= new Date(now.setDate(now.getDate() - 1));
-  }).slice(0, 3);
+  const emptyMsg = (txt) => `<div style="color:var(--text-soft);font-style:italic;padding:8px 0;font-size:17px;">${txt}</div>`;
 
-  if (events.length > 0) {
-    const card = document.getElementById('card-events');
-    const list = document.getElementById('events-list');
-    card.style.display = '';
-    list.innerHTML = events.map(e => `
-      <div class="info-row">
-        <div class="dot"></div>
-        <div>${formatEventDate(e.date)} — ${e.description}</div>
-      </div>
-    `).join('');
-  }
+  // Events card — always visible
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1); yesterday.setHours(0,0,0,0);
+  const events = (mem.upcoming_events || [])
+    .filter(e => new Date(e.date) >= yesterday)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3);
+  document.getElementById('events-list').innerHTML = events.length > 0
+    ? events.map(e => `<div class="info-row"><div class="dot"></div><div>${formatEventDate(e.date)} — ${e.description}</div></div>`).join('')
+    : emptyMsg('Nothing coming up');
 
-  // Medications card
+  // Medications card — always visible
   const meds = mem.medications || [];
-  if (meds.length > 0) {
-    const card = document.getElementById('card-meds');
-    const list = document.getElementById('meds-list');
-    card.style.display = '';
-    list.innerHTML = meds.map(m => `
-      <div class="info-row">
-        <div class="dot"></div>
-        <div><strong>${m.name}</strong> ${m.dose || ''} — ${m.time || ''}</div>
-      </div>
-    `).join('');
+  document.getElementById('meds-list').innerHTML = meds.length > 0
+    ? meds.map(m => `<div class="info-row"><div class="dot"></div><div><strong>${m.name}</strong>${m.dose ? ' ' + m.dose : ''}${m.time ? ' — ' + m.time : ''}</div></div>`).join('')
+    : emptyMsg('No medicines added yet');
+
+  // People card — show if any
+  const people = mem.family_and_friends || [];
+  if (people.length > 0) {
+    document.getElementById('card-people').style.display = '';
+    document.getElementById('people-list').innerHTML = people.map(p =>
+      `<div class="info-row"><div class="dot"></div><div><strong>${p.name}</strong>${p.relation ? ' (' + p.relation + ')' : ''}</div></div>`
+    ).join('');
   }
 }
 
@@ -851,10 +860,19 @@ function formatEventDate(dateStr) {
 }
 
 // ── Screen navigation ────────────────────────────────────
+function newChat() {
+  if (isSending) return;
+  conversationHistory = [];
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = '';
+  addWelcomeMessage();
+}
+
 function goScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   if (id === 'screen-memory') loadMemoryView();
+  if (id === 'screen-home') loadProfile();
 }
 
 function goChat() {
@@ -939,84 +957,117 @@ async function sendMessage() {
   isSending = true;
   setStatus('Thinking…', true);
   document.getElementById('btn-send').disabled = true;
+  const _speakBtn = document.getElementById('btn-speak');
+  _speakBtn.disabled = true;
+  _speakBtn.classList.remove('ready');
   showTyping();
 
-  try {
-    // Try streaming first
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: conversationHistory, stream: true }),
-    });
+  const container = document.getElementById('chat-messages');
+  const thinkingTimers = [
+    setTimeout(() => setStatus('Still thinking…', true), 15000),
+    setTimeout(() => setStatus('Almost there…', true), 35000),
+  ];
+  const clearThinkingTimers = () => thinkingTimers.forEach(t => clearTimeout(t));
 
-    if (!response.ok) throw new Error('Server error');
+  let es = null;
+  let fullText = '';
+  let streamBubble = null;
+  let hardFallback = null;
 
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-
-    // Remove typing indicator, add streaming bubble
-    const container = document.getElementById('chat-messages');
-    const typing = container.querySelector('.typing-dots');
-    if (typing) typing.parentElement.remove();
-
-    const wrapper = document.createElement('div');
-    wrapper.style.display = 'flex';
-    wrapper.style.flexDirection = 'column';
-    wrapper.style.alignItems = 'flex-start';
-    const bubble = document.createElement('div');
-    bubble.className = 'msg msg-amica';
-    const label = document.createElement('div');
-    label.className = 'msg-name';
-    label.textContent = 'AMICA';
-    bubble.appendChild(label);
-    const content = document.createElement('div');
-    bubble.appendChild(content);
-    wrapper.appendChild(bubble);
-    container.appendChild(wrapper);
-
-    let fullText = '';
-    setStatus('Responding…', true);
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') break;
-          try {
-            const obj = JSON.parse(data);
-            if (obj.token) {
-              fullText += obj.token;
-              content.textContent = fullText;
-              container.scrollTop = container.scrollHeight;
-            }
-          } catch (e) { /* skip */ }
-        }
-      }
+  function finish() {
+    clearThinkingTimers();
+    clearTimeout(hardFallback);
+    if (es) { es.close(); es = null; }
+    // Strip any [MEM:...] tag before display and history — server handles the save
+    fullText = fullText.replace(/\s*\[MEM:[^\]]*\]/gi, '').trim();
+    if (streamBubble) streamBubble.textContent = fullText;
+    const dots = container.querySelector('.typing-dots');
+    if (dots) dots.parentElement.remove();
+    if (!streamBubble && fullText) appendMessage('amica', fullText);
+    else if (!fullText) appendMessage('amica', "I'm sorry, I had a little trouble responding just then. Please try again.");
+    if (fullText) {
+      lastAmicaMessage = fullText;
+      conversationHistory.push({ role: 'assistant', content: fullText });
+      if (isRecording) speakText(fullText);
+      const speakBtn = document.getElementById('btn-speak');
+      speakBtn.disabled = false;
+      speakBtn.classList.add('ready');
     }
-
-    lastAmicaMessage = fullText;
-    conversationHistory.push({ role: 'assistant', content: fullText });
-
-    // Auto-speak if voice mode was used
-    if (isRecording || document.getElementById('btn-speak').classList.contains('active')) {
-      speakText(fullText);
-    }
-
-  } catch (err) {
-    const container = document.getElementById('chat-messages');
-    const typing = container.querySelector('.typing-dots');
-    if (typing) typing.parentElement.remove();
-    appendMessage('amica', "I'm sorry, I had a little trouble responding just then. Please try again.");
-    console.error(err);
+    isSending = false;
+    setStatus('Ready');
+    document.getElementById('btn-send').disabled = false;
   }
 
-  isSending = false;
-  setStatus('Ready');
-  document.getElementById('btn-send').disabled = false;
+  function showError(msg) {
+    clearThinkingTimers();
+    clearTimeout(hardFallback);
+    if (es) { es.close(); es = null; }
+    const dots = container.querySelector('.typing-dots');
+    if (dots) dots.parentElement.remove();
+    appendMessage('amica', msg);
+    isSending = false;
+    setStatus('Ready');
+    document.getElementById('btn-send').disabled = false;
+  }
+
+  try {
+    // Step 1: queue the job — fast POST, returns job_id immediately
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), 10000);
+    const queueRes = await fetch('/api/chat/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: conversationHistory, client_time: new Date().toISOString() }),
+      signal: ctrl.signal,
+    });
+    if (!queueRes.ok) throw new Error('queue failed');
+    const { job_id } = await queueRes.json();
+
+    // Step 2: stream tokens via EventSource (GET — native iOS Safari support)
+    es = new EventSource(`/api/chat/stream/${job_id}`);
+
+    es.onmessage = (evt) => {
+      if (evt.data === '[DONE]') { finish(); return; }
+      try {
+        const { token, error } = JSON.parse(evt.data);
+        if (error) { showError("I'm sorry, I had a little trouble responding just then. Please try again."); return; }
+        if (!token) return;
+        fullText += token;
+        if (!streamBubble) {
+          // First token: swap dots for a live text bubble
+          const dots = container.querySelector('.typing-dots');
+          if (dots) dots.parentElement.remove();
+          const wrapper = document.createElement('div');
+          wrapper.style.cssText = 'display:flex;flex-direction:column;align-items:flex-start';
+          const bub = document.createElement('div');
+          bub.className = 'msg msg-amica';
+          const lbl = document.createElement('div');
+          lbl.className = 'msg-name';
+          lbl.textContent = 'AMICA';
+          streamBubble = document.createElement('div');
+          bub.appendChild(lbl);
+          bub.appendChild(streamBubble);
+          wrapper.appendChild(bub);
+          container.appendChild(wrapper);
+        }
+        // Strip complete tags and partial tags (still streaming — no closing bracket yet)
+        streamBubble.textContent = fullText.replace(/\s*\[MEM:[^\]]*\]?/gi, '').trim();
+        container.scrollTop = container.scrollHeight;
+      } catch(e) {}
+    };
+
+    es.onerror = () => { fullText ? finish() : showError("I'm sorry, I had a little trouble responding just then. Please try again."); };
+
+    // Hard ceiling — 140s matches server LLAMA_TIMEOUT (125s) plus margin
+    hardFallback = setTimeout(() => {
+      fullText ? finish() : showError("I'm sorry, that took too long. Please try again with a shorter message.");
+    }, 140000);
+
+  } catch(err) {
+    showError(err.name === 'AbortError'
+      ? "Couldn't reach the server. Is AMICA still starting up? Please wait a moment and try again."
+      : "I'm sorry, I had a little trouble responding just then. Please try again.");
+  }
 }
 
 // Enter to send (but Shift+Enter for newline)
@@ -1045,7 +1096,7 @@ function setStatus(text, thinking = false) {
 // ── Voice Input (Web Speech API) ─────────────────────────
 function toggleMic() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    showToast("Voice input isn't available on this browser. Please type instead.");
+    showToast("Tap the text box, then use the microphone key on your keyboard to speak.");
     return;
   }
   if (isRecording) {
@@ -1058,7 +1109,7 @@ function toggleMic() {
 function startMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SR();
-  recognition.lang = 'en-GB';
+  recognition.lang = navigator.language || 'en-GB';
   recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
@@ -1093,6 +1144,10 @@ function startMic() {
     document.getElementById('mic-label').textContent = 'Speak';
     if (event.error === 'no-speech') {
       showToast("I didn't hear anything. Please try again.");
+    } else if (event.error === 'not-allowed') {
+      showToast("Microphone permission denied. Please allow it in Safari settings.");
+    } else if (event.error === 'service-not-allowed' || event.error === 'network') {
+      showToast("Voice recognition needs internet. Use the keyboard microphone key instead.");
     }
   };
 
@@ -1104,27 +1159,40 @@ function stopMic() {
 }
 
 // ── Text to Speech ────────────────────────────────────────
+let _cachedVoices = [];
+if ('speechSynthesis' in window) {
+  const loadVoices = () => { _cachedVoices = window.speechSynthesis.getVoices(); };
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
 function speakLast() {
   if (lastAmicaMessage) speakText(lastAmicaMessage);
 }
 
 function speakText(text) {
-  if (!('speechSynthesis' in window)) return;
+  if (!('speechSynthesis' in window)) {
+    showToast("Text-to-speech isn't available on this browser.");
+    return;
+  }
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'en-GB';
-  utter.rate = 0.88;   // Slightly slower for elderly users
+  utter.rate = 0.88;
   utter.pitch = 1.0;
   utter.volume = 1.0;
 
-  // Prefer a warm UK female voice if available
-  const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v =>
-    v.lang.startsWith('en') && v.name.toLowerCase().includes('female')
-  ) || voices.find(v =>
-    v.lang === 'en-GB'
-  ) || voices[0];
-  if (preferred) utter.voice = preferred;
+  const voices = _cachedVoices.length ? _cachedVoices : window.speechSynthesis.getVoices();
+  const preferred =
+    voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('female')) ||
+    voices.find(v => v.lang === 'en-GB') ||
+    voices.find(v => v.lang.startsWith('en')) ||
+    voices[0];
+  if (preferred) {
+    utter.voice = preferred;
+    utter.lang = preferred.lang;
+  } else {
+    utter.lang = navigator.language || 'en-GB';
+  }
 
   window.speechSynthesis.speak(utter);
 }
@@ -1194,17 +1262,6 @@ function buildMemoryHTML(mem) {
     `).join(''));
   } else {
     html += section('👨‍👩‍👧 Family & Friends', '<div class="mem-empty">No people saved yet.</div>');
-  }
-
-  // Recent notes
-  const notes = (mem.recent_notes || []).slice(-5).reverse();
-  if (notes.length > 0) {
-    html += section('📝 Recent Notes', notes.map(n => `
-      <div class="mem-item">
-        <div class="mem-badge">${esc(n.date)}</div>
-        <div class="mem-item-detail">${esc(n.content)}</div>
-      </div>
-    `).join(''));
   }
 
   return html;

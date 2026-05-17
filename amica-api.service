@@ -1,0 +1,18 @@
+[Unit]
+Description=AMICA FastAPI companion server
+After=amica-llama.service
+Wants=amica-llama.service
+
+[Service]
+Type=simple
+User=arduino
+WorkingDirectory=/home/arduino/amica
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 90); do curl -sf http://127.0.0.1:8080/health && exit 0; sleep 2; done; exit 1'
+ExecStart=/home/arduino/amica/venv/bin/python3 -m uvicorn amica_server:app --host 0.0.0.0 --port 5000
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/amica-api.log
+StandardError=append:/var/log/amica-api.log
+
+[Install]
+WantedBy=multi-user.target

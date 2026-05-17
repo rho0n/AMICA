@@ -1,0 +1,15 @@
+[Unit]
+Description=AMICA llama.cpp inference server
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/root/llama.cpp/build/bin/llama-server -m /home/arduino/amica/models/google_gemma-4-E2B-it-Q4_K_M.gguf --host 127.0.0.1 --port 8080 --ctx-size 2048 --threads 4 --n-predict 256 --reasoning off
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/var/log/amica-llama.log
+StandardError=append:/var/log/amica-llama.log
+
+[Install]
+WantedBy=multi-user.target
