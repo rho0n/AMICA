@@ -228,10 +228,25 @@ See `memory_example.json` for a complete example with all fields.
 From your development machine:
 
 ```bash
+# If your board is on your home/local network, set its IP first:
+BOARD_HOME_IP=192.168.1.100 bash deploy.sh
+
+# If using the AMICA hotspot only, just run:
 bash deploy.sh
 ```
 
-This copies `index.html`, `memory_manager.py`, and `amica_server.py` to the board and restarts the service. Tries the board's home Wi-Fi IP first, then the hotspot IP.
+This copies `index.html`, `memory_manager.py`, and `amica_server.py` to the board and restarts the service.
+
+To find your board's local IP, run `ip addr` or `hostname -I` on the board over SSH. The script falls back to the hotspot IP (`10.42.0.1`) automatically if the home IP is not set or unreachable.
+
+The script uses `sshpass` — install it first if needed:
+```bash
+# macOS
+brew install hudochenkov/sshpass/sshpass
+
+# Debian/Ubuntu
+sudo apt-get install sshpass
+```
 
 ---
 
