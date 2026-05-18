@@ -1,6 +1,8 @@
 #!/bin/bash
 # Tries home WiFi first, then AMICA hotspot
-for IP in 192.168.1.155 192.168.1.156 10.42.0.1; do
+# Set BOARD_HOME_IP to your board's local network IP, or leave blank to skip
+BOARD_HOME_IP="${BOARD_HOME_IP:-}"
+for IP in $BOARD_HOME_IP 10.42.0.1; do
   if sshpass -p password ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no arduino@$IP "echo ok" &>/dev/null; then
     HOST=arduino@$IP
     echo "Connected via $IP"
