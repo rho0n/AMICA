@@ -10,3 +10,5 @@ venv/
 *.bak
 start_vulkan.sh
 check.sh
+recover.sh
+test_amica.sh
