@@ -314,7 +314,7 @@ async def chat(req: ChatRequest):
         "model": "gemma",  # llama-server ignores this but requires it
         "messages": llama_messages,
         "stream": req.stream,
-        "max_tokens": 35,
+        "max_tokens": 45,
         "temperature": 0.7,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
@@ -363,7 +363,7 @@ async def chat_queue(req: ChatRequest):
         "model": "gemma",
         "messages": llama_messages,
         "stream": True,
-        "max_tokens": 35,
+        "max_tokens": 45,
         "temperature": 0.7,
         "top_p": 0.9,
         "repeat_penalty": 1.1,

@@ -226,7 +226,7 @@ def parse_mem_tag(response: str, client_time: str = "") -> bool:
         name = parts[1]
         dose = parts[2] if len(parts) > 2 else ""
         time_str = parts[3] if len(parts) > 3 else ""
-        if len(name) >= 2:
+        if len(name) >= 3:
             add_medication(name.title(), dose, time_str)
             return True
     return False
@@ -277,7 +277,7 @@ def merge_extracted_facts(facts: dict) -> None:
 
     for med in facts.get("medications", []):
         name = med.get("name", "").strip()
-        if len(name) < 2:
+        if len(name) < 3:
             continue
         meds = memory.setdefault("medications", [])
         if not any(m.get("name", "").lower() == name.lower() for m in meds):
@@ -330,8 +330,24 @@ _FACT_CLEANUP = re.compile(
 _DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 _MED_RE = re.compile(
-    r"\bi(?:'?m)? (?:take|taking|on)\s+(?:a\s+)?([a-z][a-z\s\-]{1,30}?)(?:\s+(\d+\s*mg|\d+\s*mcg|\d+\s*ml))?"
+    r"\bi(?:'?m)?\s+(?:(?:now\s+)?(?:need|have|want|going|supposed|start(?:ing)?)\s+to\s+)?(?:take|taking|on)\s+(?:a\s+)?([a-z][a-z\s\-]{1,30}?)(?:\s+(\d+\s*mg|\d+\s*mcg|\d+\s*ml))?"
     r"(?:\s+(?:every\s+)?(morning|evening|night|afternoon|at night|at morning|daily|twice a day|once a day))?",
+    re.IGNORECASE,
+)
+
+# Medication keywords that signal a fact is about medicine (used in trigger context)
+_MED_KEYWORDS_RE = re.compile(
+    r'\b(?:tablet|capsule|pill|mg|mcg|ml|dose|medication|medicine|vitamin|supplement|'
+    r'inhaler|spray|patch|drop|injection|once|twice|daily|a\s+day|per\s+day)\b',
+    re.IGNORECASE,
+)
+_MED_DOSE_RE = re.compile(
+    r'\b(\d+\s*(?:mg|mcg|ml|g|iu)|(?:one|two|three|half|\d)\s+(?:tablet|capsule|pill|drop|spray)s?)\b',
+    re.IGNORECASE,
+)
+_MED_TIME_WORDS_RE = re.compile(
+    r'\b(\d{1,2}(?::\d{2})?\s*(?:am|pm)|morning|evening|night|afternoon|'
+    r'daily|twice\s+a\s+day|once\s+a\s+day|a\s+day|per\s+day)\b',
     re.IGNORECASE,
 )
 
@@ -520,8 +536,28 @@ def parse_and_save_explicit_memory(msg: str, client_time: str = "") -> bool:
         name = m2.group(1).strip().rstrip("s").strip()
         dose = (m2.group(2) or "").strip()
         time_of_day = (m2.group(3) or "").strip()
-        if len(name) >= 2 and name not in ("a", "an", "the", "some"):
+        if len(name) >= 3 and name not in ("a", "an", "the", "some"):
             add_medication(name.title(), dose, time_of_day)
+            return True
+
+    # ── Medication via keyword detection (e.g. "save vitamin C one tablet at 3pm") ──
+    if has_trigger and _MED_KEYWORDS_RE.search(lower):
+        dose_m = _MED_DOSE_RE.search(fact)
+        kw_m = _MED_KEYWORDS_RE.search(fact)
+        name_end = min(
+            dose_m.start() if dose_m else len(fact),
+            kw_m.start() if kw_m else len(fact),
+        )
+        med_name = fact[:name_end].strip().strip('.,!?').strip()
+        # Strip leading trigger words ("save", "remember", "add") if they bleed in
+        med_name = re.sub(r'^(?:save|remember|add|take|note)\s+', '', med_name, flags=re.IGNORECASE).strip()
+        dose = dose_m.group(1) if dose_m else ""
+        time_m = _MED_TIME_WORDS_RE.search(lower)
+        time_of_day = time_m.group(1) if time_m else ""
+        if (len(med_name) >= 3
+                and len(med_name.split()) <= 4
+                and med_name.lower() not in ("a", "an", "the", "some", "my")):
+            add_medication(med_name.title(), dose, time_of_day)
             return True
 
     # ── Person via name+relation patterns ────────────────────────────────────
