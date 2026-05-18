@@ -79,29 +79,85 @@
   /* ── SCREEN: Loading ─────────────────────────────────── */
   #screen-loading {
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     background: var(--cream);
-    gap: 24px;
+    overflow-y: auto;
+    padding: 0 0 32px;
+  }
+  .loading-header {
+    width: 100%;
+    background: linear-gradient(160deg, var(--brown) 0%, #7A4F25 100%);
+    padding: 52px 28px 40px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
   }
   .loading-logo {
     font-family: var(--font-head);
-    font-size: 56px;
+    font-size: 52px;
     font-weight: 700;
-    color: var(--amber);
-    letter-spacing: -1px;
+    color: var(--amber-soft);
+    letter-spacing: 2px;
   }
-  .loading-sub {
-    font-size: 18px;
-    color: var(--text-soft);
+  .loading-greeting {
+    font-family: var(--font-head);
+    font-size: 22px;
+    color: var(--white);
+    font-style: italic;
+  }
+  .loading-status {
+    font-size: 16px;
+    color: rgba(255,255,255,0.65);
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .spinner {
-    width: 48px; height: 48px;
-    border: 4px solid var(--warm-200);
-    border-top-color: var(--amber);
+    width: 18px; height: 18px;
+    border: 3px solid rgba(255,255,255,0.3);
+    border-top-color: var(--amber-soft);
     border-radius: 50%;
     animation: spin 1s linear infinite;
+    flex-shrink: 0;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-body {
+    width: 100%;
+    padding: 20px 20px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .loading-card {
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .loading-card-title {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  .loading-item {
+    font-size: 19px;
+    color: var(--text);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--warm-100);
+    line-height: 1.4;
+  }
+  .loading-item:last-child { border-bottom: none; }
+  .loading-empty {
+    font-size: 17px;
+    color: var(--text-soft);
+    font-style: italic;
+    padding: 4px 0;
+  }
 
   /* ── SCREEN: Home ────────────────────────────────────── */
   #screen-home {
@@ -616,9 +672,15 @@
 
   <!-- ═══ LOADING ═══════════════════════════════════════ -->
   <div class="screen active" id="screen-loading">
-    <div class="loading-logo">AMICA</div>
-    <div class="loading-sub">Your companion is waking up…</div>
-    <div class="spinner"></div>
+    <div class="loading-header">
+      <div class="loading-logo">AMICA</div>
+      <div class="loading-greeting" id="loading-greeting">Good morning</div>
+      <div class="loading-status">
+        <div class="spinner"></div>
+        <span id="loading-status-text">Getting ready for you…</span>
+      </div>
+    </div>
+    <div class="loading-body" id="loading-body"></div>
   </div>
 
   <!-- ═══ HOME ══════════════════════════════════════════ -->
@@ -778,7 +840,16 @@ let profileData = {};
 // ── Startup ─────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   setTimeOfDay();
+  // Step 1: wait for llama-server to be alive (boot delay)
   await waitForAmica();
+  // Step 2: load memory and populate the loading screen briefing
+  await populateLoadingScreen();
+  // Step 3: fire warmup — KV cache fills while user reads the briefing
+  fetch('/api/warmup', { method: 'POST' }).catch(() => {});
+  document.getElementById('loading-status-text').textContent = 'Warming up…';
+  // Step 4: wait until warmup is done, then advance
+  await waitForReady();
+  // Step 5: transition
   await loadProfile();
   goScreen('screen-home');
   addWelcomeMessage();
@@ -786,22 +857,69 @@ window.addEventListener('DOMContentLoaded', async () => {
 
 function setTimeOfDay() {
   const h = new Date().getHours();
+  const tod = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
   const el = document.getElementById('time-of-day');
-  if (h < 12) el.textContent = 'morning';
-  else if (h < 17) el.textContent = 'afternoon';
-  else el.textContent = 'evening';
+  if (el) el.textContent = tod;
+  const lg = document.getElementById('loading-greeting');
+  if (lg) lg.textContent = 'Good ' + tod;
 }
 
 async function waitForAmica() {
-  // Poll until llama-server is ready (can take 30–60s on first load)
   for (let i = 0; i < 60; i++) {
     try {
       const r = await fetch('/api/health');
       const data = await r.json();
       if (data.llama_server === 'ready') return;
-    } catch (e) { /* still loading */ }
+    } catch (e) { /* still starting */ }
     await sleep(2000);
   }
+}
+
+async function waitForReady() {
+  // Poll /api/ready until warmup completes (llama goes idle)
+  // First wait a moment so warmup has time to start and mark busy
+  await sleep(3000);
+  for (let i = 0; i < 90; i++) {
+    try {
+      const r = await fetch('/api/ready');
+      const data = await r.json();
+      if (data.ready) return;
+    } catch (e) { /* keep waiting */ }
+    await sleep(2000);
+  }
+}
+
+async function populateLoadingScreen() {
+  try {
+    const r = await fetch('/api/memory');
+    const mem = await r.json();
+    const body = document.getElementById('loading-body');
+    const h = new Date().getHours();
+    const cards = [];
+
+    // Events card
+    const todayStr = new Date().toISOString().split('T')[0];
+    const events = (mem.upcoming_events || []).filter(e => {
+      if (!e.date) return true;
+      return e.date >= todayStr;
+    });
+    if (events.length) {
+      let html = '<div class="loading-card-title">📅 Coming up</div>';
+      events.slice(0, 4).forEach(e => {
+        const days = e.date ? Math.round((new Date(e.date) - new Date(new Date().toDateString())) / 86400000) : -1;
+        const when = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : e.date ? `In ${days} days` : '';
+        const label = when ? ` <span style="color:var(--amber);font-size:16px;">${when}</span>` : '';
+        html += `<div class="loading-item">${e.description}${label}</div>`;
+      });
+      cards.push(html);
+    }
+
+    if (cards.length === 0) {
+      body.innerHTML = '<div class="loading-card"><div class="loading-empty">Your day is clear — nothing to remind you of right now.</div></div>';
+    } else {
+      body.innerHTML = cards.map(c => `<div class="loading-card">${c}</div>`).join('');
+    }
+  } catch (e) { /* memory not available yet, that's fine */ }
 }
 
 async function loadProfile() {
@@ -866,6 +984,8 @@ function newChat() {
   const container = document.getElementById('chat-messages');
   container.innerHTML = '';
   addWelcomeMessage();
+  // Re-warm cache — memory may have changed during the previous chat
+  fetch('/api/warmup', { method: 'POST' }).catch(() => {});
 }
 
 function goScreen(id) {

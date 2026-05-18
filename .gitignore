@@ -1,0 +1,12 @@
+memory.json
+warmup.bin
+warmup.hash
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+venv/
+.env
+*.bak
+start_vulkan.sh
+check.sh

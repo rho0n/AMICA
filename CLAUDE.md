@@ -28,19 +28,20 @@
 |---|---|
 | **Server device** | Arduino UNO Q 4GB — Qualcomm Dragonwing QRB2210 (quad-core ARM Cortex-A53 @ 2GHz, Adreno GPU), Debian Linux (Trixie), 4GB LPDDR4 RAM, 32GB eMMC, Wi-Fi 5, BT 5.1. ~$59. Hostname: Beepboop |
 | **Model** | Gemma 4 E2B — bartowski/google_gemma-4-E2B-it-GGUF, file google_gemma-4-E2B-it-Q4_K_M.gguf (3.22GB actual). Apache 2.0 — no token needed. |
-| **Inference engine** | llama.cpp (llama-server), ARM64 CPU-only (no Vulkan — see graveyard) |
+| **Inference engine** | llama.cpp (llama-server), ARM64 CPU-only. Vulkan attempted — Adreno 702 Turnip driver crashes on every real inference (see graveyard). |
 | **Demo phone** | iPhone 13. Connects to UNO Q over Wi-Fi, accesses browser UI. |
 | **Client** | Any phone browser — no app, no install required |
 
 ### Actual Performance (measured on device)
 - Prompt processing: ~349ms/token
-- Generation: ~565ms/token (~1.77 tok/s)
+- Generation: ~400-565ms/token (~1.77–2.5 tok/s)
 - System prompt ~180 tokens → ~63s prompt processing before first token
-- Typical total response time: 63s (prompt) + 40-51s (generation) = ~90-115s
-- `max_tokens: 90` — caps generation at ~51s worst case
+- Typical total response time: 63s (prompt) + ~14s (generation) = **~77s** with `max_tokens: 35`
+- `max_tokens: 35` — caps generation at ~14s (reduced from 90/51s — average AMICA reply is 15-25 tokens)
 - CPU features: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid — NO asimddp, no SVE, no i8mm
 - RAM at idle: 593MB used, 3.0GB available, 1.8GB swap
-- Generation speed varies noticeably — the Cortex-A53 frequency-scales up after load starts (chip "warming up"). First response of a session is slower.
+- Generation speed varies noticeably — the Cortex-A53 frequency-scales up after load starts. First response of a session is slower.
+- **KV cache persistence:** after first warmup, same-day restarts restore instantly from disk (warmup.bin + warmup.hash)
 
 ### SSH Access
 - User: `arduino`, password: `password`
@@ -187,7 +188,7 @@ deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the
 
 ## Current Status
 
-### WORKING (as of 2026-05-17) — MVP complete
+### WORKING (as of 2026-05-18) — MVP complete + performance improvements
 - llama-server running Gemma 4 E2B on UNO Q CPU with `--reasoning off`
 - Token-by-token streaming on iOS Safari via EventSource queue/stream pattern
 - Phone UI confirmed working on home Wi-Fi and AMICA hotspot
@@ -206,9 +207,13 @@ deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the
 - Memory recall in new chats — all saved facts appear in system prompt
 - AMICA always says "you/your" — never uses the user's name in third person
 - Profile notes: only saved when there's an explicit trigger word (prevents casual "I" statements polluting profile)
+- **KV cache persistence** — warmup.bin saved after first start; warmup.hash checked on restart. Same-day restarts are instant if memory hasn't changed.
+- **Session system prompt snapshot** — `_session_system_prompt` frozen at warmup start; reused for whole session so mid-session memory saves don't invalidate the KV cache.
+- **Background re-warmup on portal saves** — any family portal save (person/med/event/profile) triggers `_trigger_background_warmup()`. By the time user navigates from portal to chat, warmup is done.
+- `max_tokens: 35` — generation capped at ~14s (down from ~51s). AMICA's responses average 15-25 tokens so nothing is lost.
 
 ### KNOWN ISSUES / ACCEPTED TRADE-OFFS
-- **~63s wait before first token** — system prompt ~180 tokens × 349ms. UI shows animated dots + "Still thinking…" / "Almost there…" messages. Accepted for demo.
+- **~63-77s total response time** — 63s prompt processing + ~14s generation. UI shows animated dots + "Still thinking…" / "Almost there…" messages. Accepted for demo.
 - **Variable generation speed** — Cortex-A53 frequency-scales after load starts. First response of a session is noticeably slower. Expected hardware behaviour.
 - **Google Fonts CDN in index.html** — falls back to Georgia when offline. Cosmetic only.
 - **In-chat editing/deleting not supported** — chat can ADD to memory but not remove. Use /family portal to correct mistakes. This is intentional (safe design for elderly users).
@@ -223,7 +228,10 @@ deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the
 | MediaPipeTasksGenAI + .litertlm | RET_CHECK GPU crashes, wrong compression, no manifest. Hours wasted. |
 | ONNX Runtime genai-objc | 9 config files, custom tokenisation — too much for hackathon timeline. |
 | Running model on iPhone 13 | Not enough RAM/performance. |
-| Vulkan on UNO Q Adreno | glslc installed but SPIR-V headers missing. Multiple failed attempts. Do not retry. |
+| Vulkan GPU acceleration (-ngl 10/4/1) | Adreno 702 Turnip driver throws `vk::DeviceLostError` on every real inference. Works with tiny prompts but crashes on the full 180-token system prompt. `VK_ICD_FILENAMES=""` does not disable Vulkan — loader still finds ICDs via default paths. Fixed by renaming `/usr/share/vulkan/icd.d/freedreno_icd.json` to `.bak`. Do not retry GPU acceleration. |
+| OpenBLAS BLAS backend | Installed libopenblas-dev, rebuilt with `-DGGML_BLAS=ON`. Made prompt processing SLOWER (90s vs 63s) because GGML Q4_K native kernels are faster than dequantize-to-float32 + BLAS on Cortex-A53 without dotprod. Rebuilt without BLAS. |
+| VK_ICD_FILENAMES="" to disable Vulkan | Empty string does NOT override default ICD search path (`/usr/share/vulkan/icd.d/`). Vulkan still loads. Must rename the ICD JSON file instead. |
+| -ub 32 micro-batch flag | Reducing micro-batch size to limit GPU matrix size didn't prevent DeviceLostError crash. |
 | Parallel heavy tasks | Compile + download at same time killed both. Do one at a time on this board. |
 | huggingface-cli | Deprecated. Use ~/.local/bin/hf instead. |
 | pip without --break-system-packages | Debian blocks it. Use venv or add the flag. |
@@ -234,7 +242,8 @@ deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the
 | `budget_tokens: 0` API param to disable thinking | Llama-server ignores it. Must use `--reasoning off` server flag. |
 | `fetch` ReadableStream for SSE on iOS Safari | Does not deliver chunks incrementally. Perpetual dots. |
 | XHR `onprogress` for streaming on iOS Safari | Same — does not stream progressively on iOS Safari. |
-| `max_tokens: 256` | 144s worst-case — exceeds browser timeouts. Use 90 (~51s max). |
+| `max_tokens: 256` | 144s worst-case — exceeds browser timeouts. |
+| `max_tokens: 90` | 51s worst-case generation. Reduced to 35 — AMICA's replies average 15-25 tokens, so nothing cut off. ~14s generation now. |
 | Regex-only memory extraction | Misspelled trigger words ("rememeber") caused `return False` before person detection. Fixed by Pass 1 / Pass 2 restructure. |
 | Profile note fallback without trigger gate | Saved every "I …" statement as a profile note, polluting the "About them" field with chat content. Fixed by gating fallback behind `has_trigger`. |
 | Client hard fallback at 90s | With ~180-token system prompt, prompt processing takes ~63s. 90s was too close to first-token arrival. Raised to 140s. |
@@ -256,6 +265,10 @@ deploy.sh copies index.html, memory_manager.py, amica_server.py and restarts the
 - [x] AMICA says "you/your" not third-person name
 - [x] Traits saved and recalled for people
 - [x] People sorted by recency, 10-person cap
+- [x] `max_tokens: 35` — generation time cut from ~51s to ~14s
+- [x] KV cache persistence — warmup.bin + warmup.hash, instant same-day restarts
+- [x] Session system prompt snapshot — KV cache never invalidated mid-session
+- [x] Background re-warmup on family portal saves — chat is warm when user arrives
 
 ### Remaining / Stretch
 - [ ] Demo video (3 min max, YouTube) — story: elderly person, kitchen table, phone, privacy
@@ -294,7 +307,10 @@ Gemma 4 E2B is natively multimodal and llama.cpp supports vision via a `--mmproj
 | `aiter_bytes()` not `aiter_lines()` in httpx | `aiter_lines()` has internal buffering. `aiter_bytes()` with manual `\n` splitting forwards tokens immediately. |
 | System prompt ~180 tokens | 349ms/token × 180 = 63s prompt latency. Deliberately compact — every token costs ~350ms. |
 | EventSource (GET SSE) not fetch SSE | iOS Safari's fetch ReadableStream and XHR onprogress don't stream incrementally. Native `EventSource` does. |
-| `max_tokens: 90` | 90 × ~565ms = 51s worst-case generation. Fits within 125s LLAMA_TIMEOUT. |
+| `max_tokens: 35` | 35 × ~400ms = ~14s worst-case generation. AMICA's replies average 15-25 tokens — nothing cut. Down from 90 (~51s). |
+| KV cache persistence | After warmup, slot 0 saved to disk (warmup.bin) + SHA256 of system prompt (warmup.hash). On restart, if hash matches, instant restore. Same-day restarts skip 63s warmup entirely. |
+| Session system prompt snapshot | `_session_system_prompt` locked at warmup time, reused for whole session. Mid-session memory saves (via chat or portal) don't change the prompt hash, so the KV cache prefix never changes mid-conversation. |
+| Background re-warmup on portal saves | `_trigger_background_warmup()` called on every family portal write. Demo strategy: save in portal → warmup fires → explain portal for 90s → navigate to chat, first response is just ~14s generation. |
 | [MEM:] tag in AMICA's response | LLM reasoning detects save intent far more reliably than regex on messy user input. Tag format is controlled and consistent. Regex runs on LLM output, not user input. |
 | Pass 1 structural patterns before trigger check | Misspelled trigger words ("rememeber") used to exit before person detection. Pass 1 runs `_PERSON_RE` / `_MET_PERSON_RE` / `_MED_RE` on whole message regardless of triggers. |
 | Profile note fallback gated behind has_trigger | Bare "I …" statements (e.g. "I like climbing too") would pollute profile notes. Only save notes when user explicitly asks. |

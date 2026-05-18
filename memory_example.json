@@ -1,0 +1,55 @@
+{
+  "profile": {
+    "name": "Margaret",
+    "notes": [
+      "Enjoys gardening and watching nature documentaries",
+      "Prefers simple language, not medical jargon"
+    ]
+  },
+  "people": [
+    {
+      "name": "Karl",
+      "relation": "son",
+      "traits": "visits every Sunday, lives in Bristol",
+      "updated_at": "2026-05-01T10:00:00"
+    },
+    {
+      "name": "Susan",
+      "relation": "daughter",
+      "traits": "calls on Wednesdays, lives in Edinburgh",
+      "updated_at": "2026-05-01T10:00:00"
+    },
+    {
+      "name": "Dr. Patel",
+      "relation": "GP",
+      "traits": "at the Riverside Practice",
+      "updated_at": "2026-05-01T10:00:00"
+    }
+  ],
+  "medications": [
+    {
+      "name": "Metformin",
+      "dose": "500mg",
+      "time": "morning",
+      "updated_at": "2026-05-01T10:00:00"
+    },
+    {
+      "name": "Lisinopril",
+      "dose": "10mg",
+      "time": "evening",
+      "updated_at": "2026-05-01T10:00:00"
+    }
+  ],
+  "events": [
+    {
+      "date": "2026-05-20",
+      "description": "Karl visiting for lunch",
+      "updated_at": "2026-05-01T10:00:00"
+    },
+    {
+      "date": "2026-05-22",
+      "description": "GP appointment at 10am",
+      "updated_at": "2026-05-01T10:00:00"
+    }
+  ]
+}

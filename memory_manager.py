@@ -126,10 +126,10 @@ def build_system_prompt(memory: dict, client_time: str = "") -> str:
         if all_events:
             lines.append("Events: " + "; ".join(all_events))
 
-    # Memory tag instruction — server parses this to save facts without a second LLM call.
+    # Memory tag instruction — full version for reliability
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     lines.append(
-        f"To save something to memory, append ONE tag — "
+        f"To save something to memory, end your reply with ONE tag: "
         f"[MEM:person|NAME|RELATION|TRAITS] or [MEM:event|{tomorrow}|DESC] or [MEM:med|NAME|DOSE|TIME]. "
         f"Eg: [MEM:person|Stacey|friend|likes gardening]"
     )

@@ -10,6 +10,7 @@ import re
 import uuid
 import asyncio
 import logging
+import hashlib
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -32,7 +33,8 @@ from memory_manager import (
 
 LLAMA_URL = "http://127.0.0.1:8080"
 STATIC_DIR = Path(__file__).parent / "static"
-LLAMA_TIMEOUT = 125  # seconds — 180-token prompt ≈ 63s + 90-token reply ≈ 51s = ~114s; 125s gives headroom
+KV_CACHE_FILE = Path(__file__).parent / "warmup.hash"  # stores prompt hash alongside warmup.bin
+LLAMA_TIMEOUT = 150  # seconds — prompt processing ~120s on current build + ~14s generation
 MAX_HISTORY_TURNS = 4  # keep last N user+assistant pairs to prevent context overflow
 
 app = FastAPI(title="AMICA", docs_url=None, redoc_url=None)
@@ -42,6 +44,14 @@ _jobs: dict[str, tuple] = {}
 
 # Tracks when the current llama-server request started (0 = idle)
 _llama_busy_since: float = 0.0
+
+# Background KV cache warmup task — cancelled immediately on any real request
+_warmup_task: asyncio.Task | None = None
+
+# Snapshot of the system prompt used during warmup.
+# Reused for the entire chat session so the KV cache prefix never changes mid-session.
+# Updated each time warmup runs (new chat / restart). Falls back to live build if unset.
+_session_system_prompt: str = ""
 
 
 async def _cancel_llama_slot() -> None:
@@ -59,6 +69,125 @@ async def _cancel_llama_slot() -> None:
                     )
     except Exception:
         pass
+
+
+async def _save_kv_cache(system_prompt: str) -> None:
+    """After warmup, save slot 0 KV state + prompt hash so next restart is instant."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                f"{LLAMA_URL}/slots/0",
+                json={"action": "save", "filename": "warmup.bin"},
+            )
+            if r.status_code != 200:
+                log.debug("KV cache save failed: %d %s", r.status_code, r.text[:100])
+                return
+        KV_CACHE_FILE.write_text(hashlib.sha256(system_prompt.encode()).hexdigest())
+        log.info("KV cache saved to disk — next restart will be instant")
+    except Exception as exc:
+        log.debug("KV cache save error: %s", exc)
+
+
+async def _try_restore_kv_cache() -> bool:
+    """Restore saved KV cache if the system prompt hash still matches.
+    Sets _session_system_prompt on success so the session snapshot is available.
+    Returns True if restored — warmup can be skipped.
+    """
+    global _session_system_prompt
+    try:
+        if not KV_CACHE_FILE.exists():
+            return False
+        memory = load_memory()
+        system_prompt = build_system_prompt(memory)
+        h = hashlib.sha256(system_prompt.encode()).hexdigest()
+        if KV_CACHE_FILE.read_text().strip() != h:
+            log.info("KV cache stale (memory/date changed) — full warmup needed")
+            return False
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(
+                f"{LLAMA_URL}/slots/0",
+                json={"action": "restore", "filename": "warmup.bin"},
+            )
+            if r.status_code == 200:
+                _session_system_prompt = system_prompt
+                log.info("KV cache restored from disk — instantly warm")
+                return True
+            log.debug("KV cache restore failed: %d", r.status_code)
+            return False
+    except Exception as exc:
+        log.debug("KV cache restore error: %s", exc)
+        return False
+
+
+async def _run_warmup():
+    """Pre-fill KV cache with the system prompt (max_tokens=1 so we generate nothing).
+    Snapshots the system prompt for the session — reused for every message so the
+    KV prefix never changes mid-conversation and memory saves don't cause slowdowns.
+    Saves KV state to disk after completion so future restarts are instant.
+    """
+    global _llama_busy_since, _session_system_prompt
+    _llama_busy_since = asyncio.get_running_loop().time()
+    system_prompt = ""
+    try:
+        memory = load_memory()
+        system_prompt = build_system_prompt(memory)
+        _session_system_prompt = system_prompt  # lock in for this session
+        payload = {
+            "model": "gemma",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Hi"},
+            ],
+            "stream": False,
+            "max_tokens": 1,
+            "n_predict": 1,
+            "temperature": 0.0,
+            "stop": ["\n"],
+        }
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            await client.post(f"{LLAMA_URL}/v1/chat/completions", json=payload)
+        log.info("KV cache warmup complete — saving to disk")
+        await _save_kv_cache(system_prompt)
+    except asyncio.CancelledError:
+        _session_system_prompt = ""  # warmup cancelled — don't use partial state
+    except Exception as exc:
+        log.info("Warmup failed (non-fatal): %s", exc)
+    finally:
+        _llama_busy_since = 0.0
+
+
+def _trigger_background_warmup() -> None:
+    """Clear session snapshot and kick off a re-warmup after any memory change.
+    Safe to call from any endpoint — skips if llama is currently busy with a real request.
+    """
+    global _warmup_task, _session_system_prompt
+    _session_system_prompt = ""  # force fresh prompt on next real request
+    if _warmup_task and not _warmup_task.done():
+        _warmup_task.cancel()
+    if not _llama_busy_since:
+        _warmup_task = asyncio.create_task(_run_warmup())
+
+
+@app.post("/api/warmup")
+async def warmup_cache():
+    """Called by the loading screen to pre-warm the KV cache.
+    Tries instant disk restore first. Falls back to full warmup if memory/date changed.
+    """
+    global _warmup_task
+    if _llama_busy_since:
+        return JSONResponse({"ok": False, "reason": "busy"})
+    if _warmup_task and not _warmup_task.done():
+        return JSONResponse({"ok": False, "reason": "already running"})
+    if await _try_restore_kv_cache():
+        return JSONResponse({"ok": True, "restored": True})
+    _warmup_task = asyncio.create_task(_run_warmup())
+    return JSONResponse({"ok": True, "restored": False})
+
+
+@app.get("/api/ready")
+async def ready():
+    """Returns true when llama-server is idle and KV cache warmup has completed."""
+    return {"ready": _llama_busy_since == 0.0}
 
 
 @app.on_event("startup")
@@ -125,39 +254,46 @@ async def family_portal():
 async def api_update_profile(request: Request):
     d = await request.json()
     update_profile(name=d.get("name", ""), notes=d.get("notes"))
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.post("/api/memory/medication")
 async def api_add_medication(request: Request):
     d = await request.json()
     add_medication(d.get("name", ""), d.get("dose", ""), d.get("time", ""))
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.delete("/api/memory/medication/{name}")
 async def api_remove_medication(name: str):
     remove_medication(name)
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.post("/api/memory/person")
 async def api_add_person(request: Request):
     d = await request.json()
     add_person(d.get("name", ""), d.get("relation", ""), d.get("traits", ""))
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.delete("/api/memory/person/{name}")
 async def api_remove_person(name: str):
     remove_person(name)
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.post("/api/memory/event")
 async def api_add_event(request: Request):
     d = await request.json()
     add_event(d.get("date", ""), d.get("description", ""))
+    _trigger_background_warmup()
     return {"ok": True}
 
 @app.delete("/api/memory/event/{index}")
 async def api_remove_event(index: int):
     remove_event(index)
+    _trigger_background_warmup()
     return {"ok": True}
 
 
@@ -167,8 +303,7 @@ async def chat(req: ChatRequest):
     Main chat endpoint. Injects the memory system prompt, then
     forwards to llama-server. Streams the response back to the phone.
     """
-    memory = load_memory()
-    system_prompt = build_system_prompt(memory, client_time=req.client_time)
+    system_prompt = _session_system_prompt or build_system_prompt(load_memory(), client_time=req.client_time)
 
     # Build message list with injected system context
     llama_messages = [{"role": "system", "content": system_prompt}]
@@ -179,7 +314,7 @@ async def chat(req: ChatRequest):
         "model": "gemma",  # llama-server ignores this but requires it
         "messages": llama_messages,
         "stream": req.stream,
-        "max_tokens": 90,
+        "max_tokens": 35,
         "temperature": 0.7,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
@@ -203,13 +338,22 @@ async def chat_queue(req: ChatRequest):
     """Queue a chat job and return a job_id immediately.
     Client then connects to /api/chat/stream/{job_id} via EventSource.
     """
+    global _warmup_task
+    # Real request always takes priority — cancel warmup immediately if running
+    if _warmup_task and not _warmup_task.done():
+        _warmup_task.cancel()
+        await _cancel_llama_slot()
+        await asyncio.sleep(0.3)  # give the slot time to clear
+
     # If a previous request has been running longer than the timeout, cancel it now
     # so this new request isn't queued behind a permanently stuck one.
     if _llama_busy_since and (asyncio.get_running_loop().time() - _llama_busy_since) > LLAMA_TIMEOUT:
         await _cancel_llama_slot()
 
-    memory = load_memory()
-    system_prompt = build_system_prompt(memory, client_time=req.client_time)
+    # Use the session snapshot so the KV prefix stays identical to the warmup prompt.
+    # This guarantees prefix reuse on every message — no 63s re-processing after memory saves.
+    # Memory saved during this session appears on the next session when warmup refreshes.
+    system_prompt = _session_system_prompt or build_system_prompt(load_memory(), client_time=req.client_time)
     llama_messages = [{"role": "system", "content": system_prompt}]
     # Trim history to last N turns so context never overflows the 2048-token window
     messages = req.messages[-(MAX_HISTORY_TURNS * 2):]
@@ -219,7 +363,7 @@ async def chat_queue(req: ChatRequest):
         "model": "gemma",
         "messages": llama_messages,
         "stream": True,
-        "max_tokens": 90,
+        "max_tokens": 35,
         "temperature": 0.7,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
@@ -314,7 +458,7 @@ async def _llm_extract_memory(user_msg: str, client_time: str) -> None:
             "model": "gemma",
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "max_tokens": 90,
+            "max_tokens": 70,
             "temperature": 0.1,
         }
         async with httpx.AsyncClient(timeout=90.0) as client:
@@ -354,6 +498,8 @@ async def _run_stream_job(job_id: str, payload: dict, user_msg: str, client_time
                         log.error("llama-server %d: %s", response.status_code, body[:200])
                         return
                     buf = ""
+                    mem_buf = ""   # accumulates text once '[MEM:' prefix starts
+                    in_mem_tag = False
                     async for raw in response.aiter_bytes():
                         buf += raw.decode("utf-8", errors="replace")
                         while "\n" in buf:
@@ -372,8 +518,46 @@ async def _run_stream_job(job_id: str, payload: dict, user_msg: str, client_time
                                         .get("delta", {})
                                         .get("content", "")
                                     )
-                                    if token:
-                                        full_response += token
+                                    if not token:
+                                        continue
+                                    full_response += token
+
+                                    if in_mem_tag:
+                                        # Inside a [MEM:...] tag — swallow tokens until ']'
+                                        mem_buf += token
+                                        if "]" in mem_buf:
+                                            in_mem_tag = False
+                                            mem_buf = ""
+                                        # Never forward these to the queue
+                                        continue
+
+                                    # Check if this token (or with buffered pending) starts a [MEM: tag
+                                    pending = mem_buf + token
+                                    MEM_PREFIX = "[MEM:"
+                                    if MEM_PREFIX in pending:
+                                        # Split: everything before [MEM: is safe to send
+                                        before, _ = pending.split(MEM_PREFIX, 1)
+                                        before = before.rstrip()  # trim trailing space before tag
+                                        if before:
+                                            await queue.put(before)
+                                        in_mem_tag = True
+                                        mem_buf = MEM_PREFIX + pending.split(MEM_PREFIX, 1)[1]
+                                        if "]" in mem_buf:
+                                            in_mem_tag = False
+                                            mem_buf = ""
+                                        continue
+
+                                    # Could this token be the start of '[MEM:' arriving in pieces?
+                                    # Buffer it only if pending (stripped of leading spaces) is a strict prefix of '[MEM:'
+                                    if MEM_PREFIX.startswith(pending.lstrip()) and 0 < len(pending.lstrip()) < len(MEM_PREFIX):
+                                        mem_buf = pending
+                                        continue
+
+                                    # Safe — flush any buffered prefix + this token
+                                    if mem_buf:
+                                        await queue.put(mem_buf + token)
+                                        mem_buf = ""
+                                    else:
                                         await queue.put(token)
                                 except json.JSONDecodeError:
                                     pass
@@ -394,13 +578,12 @@ async def _run_stream_job(job_id: str, payload: dict, user_msg: str, client_time
 
     if user_msg:
         # Layer 1 (most reliable): parse [MEM:...] tag from AMICA's own response
-        tag_saved = parse_mem_tag(full_response, client_time)
-        if not tag_saved:
-            # Layer 2: regex patterns on user message
-            regex_saved = parse_and_save_explicit_memory(user_msg, client_time)
-            if not regex_saved:
-                # Layer 3: background LLM extraction as last resort
-                asyncio.create_task(_llm_extract_memory(user_msg, client_time))
+        parse_mem_tag(full_response, client_time)
+        # Layer 2: regex patterns on user message (runs regardless — catches typos)
+        parse_and_save_explicit_memory(user_msg, client_time)
+        # NOTE: No background LLM extraction or re-warmup fired here.
+        # Both destroy the slot's KV cache, breaking prefix reuse for subsequent
+        # turns in the same conversation. The JS triggers warmup on New Chat instead.
 
 
 
